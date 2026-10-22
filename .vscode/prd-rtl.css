@@ -1,0 +1,66 @@
+/* نمایش راست‌به‌چپ پیش‌نمایش Markdown سند PRD */
+body {
+  direction: rtl;
+  text-align: right;
+  font-family: "Vazirmatn", "IRANSans", "Sahel", "Tahoma", sans-serif;
+  line-height: 1.9;
+}
+
+h1, h2, h3, h4, h5, h6,
+p, li, blockquote, dd, dt, figcaption {
+  text-align: right;
+}
+
+ul, ol {
+  padding-right: 1.8em;
+  padding-left: 0;
+}
+
+ul ul, ol ol, ul ol, ol ul {
+  padding-right: 1.4em;
+  padding-left: 0;
+}
+
+blockquote {
+  border-right: 4px solid #d0d7de;
+  border-left: 0;
+  padding-right: 1em;
+  padding-left: 0;
+  color: #57606a;
+}
+
+/* کد و اصطلاحات لاتین در جهت طبیعی خودشان بمانند */
+code, pre, kbd, samp {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: embed;
+  font-family: "JetBrains Mono", "Menlo", "Consolas", monospace;
+}
+
+pre {
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(175, 184, 193, 0.2);
+  white-space: nowrap;
+}
+
+/* جدول‌ها راست‌به‌چپ */
+table {
+  direction: rtl;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+table th, table td {
+  text-align: right;
+  border: 1px solid #d0d7de;
+  padding: 6px 10px;
+}
+
+/* لینک‌ها و متن‌های تأکیدی */
+a { unicode-bidi: plaintext; }
