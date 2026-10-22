@@ -1,0 +1,75 @@
+# ─── سیستم‌عامل ───────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# ─── محیط و رمزها ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+
+# ─── Node / TypeScript ───────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.npm/
+.npm-cache/
+*.tsbuildinfo
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+out/
+.vite/
+
+# ─── ویرایشگرها ─────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/prd-rtl.css
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*~
+
+# ─── اسناد و ادیتور موقت ─────────────────────────────────
+~$*.docx
+~$*.xlsx
+~$*.pptx
+*.tmp
+*.bak
+*_backup.*
+*_old.*
+*.orig
+
+# ─── فایل‌های محلی آزمون و داده‌ی واقعی ────────────────────
+local-data/
+fixtures/private/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+redis-data/
+dump.rdb
+
+# ─── هنر و طراحی ─────────────────────────────────────────────
+# تحویل‌های موقت طراحی؛ نسخه‌ی نهایی از پوشه‌ی design/ مدیریت شود
+design/.cache/
+*.sketch~
+*.ai~

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 گزارش امنیتی (خصوصی)
+    url: https://github.com/matindrg/Condorlab/security/advisories/new
+    about: آسیب‌پذیری‌ها را هرگز به‌صورت Issue عمومی ثبت نکنید؛ از Security Advisory استفاده کنید.
+  - name: 🧭 نقشه‌ی راه پیش از کدنویسی
+    url: https://github.com/matindrg/Condorlab/blob/main/CONDORLAB_ROADMAP_FA.md
+    about: پیش از پیشنهاد کار جدید، مرحله‌های ۰ تا ۶ و دروازه‌ی G1 را ببینید.
+  - name: 📘 PRD — مرجع واحد قواعد
+    url: https://github.com/matindrg/Condorlab/blob/main/CONDORLAB_PRD_FA-V3.md
+    about: همه‌ی قواعد محصول، تصمیم‌ها و خطاها در این سند است.
