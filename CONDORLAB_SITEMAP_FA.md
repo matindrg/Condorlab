@@ -1,10 +1,11 @@
 # سایت‌مپ کندرلب (MVP)
 
-> **نسخه:** ۱٫۲ — به‌روزرسانی‌شده با بازبینی ۳٫۱ PRD
-> **تاریخ:** ۲۹ مهر ۱۴۰۵ | **آخرین اصلاح:** ۳۰ مهر ۱۴۰۵
-> **مبنا:** `CONDORLAB_MVP_FA.md` (۲٫۱)، `CONDORLAB_PRODUCT_BRIEF_FA.md`، `CONDORLAB_USER_FLOW_FA.md` (۱٫۲) و `CONDORLAB_PRD_FA-V3.md` (۳٫۱)
-> **دامنه:** ساختار اطلاعات و مسیرهای MVP. مسیرهای پس از MVP با برچسب «رزرو» آمده‌اند تا معماری اطلاعات آینده بدون بازطراحی رشد کند.
-> **کاربرد:** ورودی وایرفریم صفحات کلیدی، ناوبری، مجوز مسیر و تست پذیرش.
+> **نسخه:** ۱٫۳ — به‌روزرسانی‌شده با استراتژی بازگشت، دو پایلوت و الزامات ۳٫۳ PRD  
+> **تاریخ:** آبان ۱۴۰۵  
+> **مبنا:** `CONDORLAB_MVP_FA.md` (نسخه ۲٫۳)، `CONDORLAB_PRODUCT_BRIEF_FA.md` (نسخه ۳٫۰)، `CONDORLAB_USER_FLOW_FA.md` (۱٫۳) و `CONDORLAB_PRD_FA-V3.md` (۳٫۳)  
+> **دامنه:** ساختار اطلاعات، مسیرهای فاز A و مسیرهای رزرو فاز B.  
+> **کاربرد:** ورودی وایرفریم صفحات کلیدی، ناوبری، مجوز مسیر و تست پذیرش.  
+
 
 ---
 
@@ -97,6 +98,7 @@
 │   ├── /admin/exams/new
 │   └── /admin/exams/[examId]
 │       ├── /admin/exams/[examId]/questions
+│       ├── /admin/exams/[examId]/import-csv   (درون‌ریزی دسته‌ای CSV و تصاویر)
 │       ├── /admin/exams/[examId]/preview
 │       ├── /admin/exams/[examId]/monitor
 │       ├── /admin/exams/[examId]/results
