@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'داشبورد داوطلب | کندرلب',
+  title: 'پنل کاربری',
   description: 'مشاهده مشخصات ثبت‌شده و محصولات و آزمون‌های خریداری‌شده داوطلب در کندرلب.',
 };
 

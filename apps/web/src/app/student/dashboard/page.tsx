@@ -65,8 +65,68 @@ export default function StudentDashboardPage() {
   const { user: authUser, enrolledExamIds, isLoading: authLoading, refreshAuth } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('condor_user');
+        if (cached) {
+          const u = JSON.parse(cached);
+          if (u?.profile) {
+            return {
+              firstName: u.profile.firstName || '',
+              lastName: u.profile.lastName || '',
+              fullName:
+                u.profile.fullName ||
+                `${u.profile.firstName || ''} ${u.profile.lastName || ''}`.trim() ||
+                'داوطلب المپیاد',
+              phoneNumber: u.profile.phoneNumber || '',
+              grade: u.profile.grade || '10',
+              school: u.profile.school || 'نامشخص',
+              city: u.profile.city || 'نامشخص',
+              email: u.email || '',
+              role: u.role || 'Student',
+              createdAt: u.createdAt,
+            };
+          }
+        }
+      } catch {}
+    }
+    return null;
+  });
   const [products, setProducts] = useState<PurchasedProduct[]>([]);
+
+  // به‌روزرسانی عنوان تب مرورگر به صورت «پنل کاربری {نام کاربر} | کندرلب»
+  useEffect(() => {
+    const nameParts = [
+      profile?.firstName?.trim() || authUser?.profile?.firstName?.trim(),
+      profile?.lastName?.trim() || authUser?.profile?.lastName?.trim(),
+    ].filter(Boolean);
+
+    let displayName = '';
+    if (nameParts.length > 0) {
+      displayName = nameParts.join(' ');
+    } else if (profile?.fullName && profile.fullName !== 'داوطلب المپیاد' && profile.fullName !== 'داوطلب گرامی') {
+      displayName = profile.fullName.trim();
+    } else if (authUser?.profile?.fullName && authUser.profile.fullName !== 'داوطلب المپیاد' && authUser.profile.fullName !== 'داوطلب گرامی') {
+      displayName = authUser.profile.fullName.trim();
+    } else if (authUser?.name?.trim()) {
+      displayName = authUser.name.trim();
+    }
+
+    if (displayName) {
+      document.title = `پنل کاربری ${displayName} | کندرلب`;
+    } else {
+      document.title = 'پنل کاربری | کندرلب';
+    }
+  }, [
+    profile?.firstName,
+    profile?.lastName,
+    profile?.fullName,
+    authUser?.profile?.firstName,
+    authUser?.profile?.lastName,
+    authUser?.profile?.fullName,
+    authUser?.name,
+  ]);
 
   // استیت‌های ویرایش مشخصات
   const [isEditing, setIsEditing] = useState(false);

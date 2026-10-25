@@ -58,3 +58,38 @@ export function formatToman(amount: number | string): string {
   if (isNaN(num) || num === 0) return 'رایگان';
   return `${formatPersianNumber(num)} تومان`;
 }
+
+/**
+ * نگاشت رسمی پایه‌های تحصیلی به صورت حروفی فارسی (استاندارد R-66)
+ */
+export const GRADE_PERSIAN_NAMES: Record<string, string> = {
+  '7': 'هفتم',
+  '8': 'هشتم',
+  '9': 'نهم',
+  '10': 'دهم',
+  '11': 'یازدهم',
+  '12': 'دوازدهم',
+  Grade7: 'هفتم',
+  Grade8: 'هشتم',
+  Grade9: 'نهم',
+  Grade10: 'دهم',
+  Grade11: 'یازدهم',
+};
+
+/**
+ * تبدیل کد یا شماره پایه تحصیلی به نگارش رسمی حروفی («پایه دهم»، «پایه یازدهم»، و...)
+ * بر اساس استاندارد PRD (قاعده R-66) نباید از ارقام مانند «پایه ۱۰» در رابط کاربری استفاده شود.
+ */
+export function formatGrade(
+  grade: string | number | null | undefined,
+  includePrefix: boolean = true
+): string {
+  if (grade === null || grade === undefined || grade === '') return '';
+  const rawStr = grade.toString().trim();
+  const cleaned = rawStr.replace(/^پایه\s*/, '').trim();
+  const normalizedKey = toEnglishDigits(cleaned);
+
+  const ordinalName = GRADE_PERSIAN_NAMES[normalizedKey] || GRADE_PERSIAN_NAMES[cleaned] || cleaned;
+
+  return includePrefix ? `پایه ${ordinalName}` : ordinalName;
+}

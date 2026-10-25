@@ -37,23 +37,28 @@ export function ExamHeader({
   onTimeExpired,
 }: ExamHeaderProps) {
   const [timeLeft, setTimeLeft] = useState(initialRemainingSeconds);
+  const hasExpiredRef = React.useRef(false);
 
-  // شمارش معکوس مستقل در کلاینت با گارد صفر
+  // همگام‌سازی زمان با سرور
   useEffect(() => {
     setTimeLeft(initialRemainingSeconds);
+    if (initialRemainingSeconds > 0) {
+      hasExpiredRef.current = false;
+    }
   }, [initialRemainingSeconds]);
 
+  // شمارش معکوس مستقل در کلاینت
   useEffect(() => {
-    if (timeLeft <= 0) {
-      onTimeExpired();
-      return;
-    }
+    if (timeLeft <= 0) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          onTimeExpired();
+          if (!hasExpiredRef.current) {
+            hasExpiredRef.current = true;
+            onTimeExpired();
+          }
           return 0;
         }
         return prev - 1;
@@ -61,7 +66,7 @@ export function ExamHeader({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft, onTimeExpired]);
+  }, [onTimeExpired]);
 
   const formatTimer = (seconds: number) => {
     const h = Math.floor(seconds / 3600);

@@ -68,9 +68,24 @@ export class ExamRoomService {
 
     // محاسبه زمان باقیمانده بر مبنای ساعت سرور و شروع آزمون
     const durationMinutes = dbExam.durationMinutes || 120;
-    const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
-    const expiryTime = startedAt + durationMinutes * 60 * 1000;
-    const remainingSeconds = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+    let startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
+    let expiryTime = startedAt + durationMinutes * 60 * 1000;
+    let remainingSeconds = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+
+    // اگر کاربر هنوز آزمون را آغاز نکرده یا پاسخی ثبت نکرده و زمان انقضا بر مبنای تاریخ ثبت‌نام منقضی شده است،
+    // زمان شروع آزمون از لحظه ورود داوطلب به اتاق آزمون محاسبه می‌شود
+    if (remainingSeconds <= 0 && (!attempt.answers || attempt.answers.length === 0)) {
+      startedAt = Date.now();
+      expiryTime = startedAt + durationMinutes * 60 * 1000;
+      remainingSeconds = durationMinutes * 60;
+
+      this.prisma.client.attempt
+        .update({
+          where: { id: attempt.id },
+          data: { startedAt: new Date(startedAt) },
+        })
+        .catch(() => {});
+    }
 
     // تجمیع پاسخ‌های ذخیره‌شده در Postgres و پاسخ‌های اخیر موجود در ردیس
     const redisAnswers = await this.examLock.getStoredAnswers(attempt.id);

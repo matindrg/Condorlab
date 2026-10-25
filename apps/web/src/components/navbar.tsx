@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { LogoutDialog } from '@/components/logout-dialog';
 import { toast } from '@/components/ui/toast';
+import { formatGrade } from '@condorlab/shared';
 
 export interface AuthUser {
   id: string;
@@ -270,7 +271,7 @@ export function Navbar() {
                       : 'داوطلب المپیاد'}
                   </span>
                   <span className="text-[10px] text-[#FFCC00] font-mono leading-none">
-                    {user.profile?.grade ? `پایه ${user.profile.grade}` : 'عضو رسمی'}
+                    {user.profile?.grade ? formatGrade(user.profile.grade) : 'عضو رسمی'}
                   </span>
                 </div>
                 <ChevronDown
@@ -291,7 +292,7 @@ export function Navbar() {
                         : 'کاربر رسمی کندرلب'}
                     </div>
                     <div className="text-[11px] text-[#FFCC00] mt-0.5 font-medium">
-                      {user.profile?.grade ? `پایه ${user.profile.grade}` : 'پایه نامشخص'}
+                      {user.profile?.grade ? formatGrade(user.profile.grade) : 'پایه نامشخص'}
                       {user.profile?.school ? ` • ${user.profile.school}` : ''}
                       {user.profile?.city ? ` (${user.profile.city})` : ''}
                     </div>
@@ -386,7 +387,7 @@ export function Navbar() {
                       : 'کاربر کندرلب'}
                   </div>
                   <div className="text-[11px] text-[#FFCC00] mt-0.5 font-medium">
-                    {user.profile?.grade ? `پایه ${user.profile.grade}` : 'عضو رسمی'}
+                    {user.profile?.grade ? formatGrade(user.profile.grade) : 'عضو رسمی'}
                     {user.profile?.school ? ` • ${user.profile.school}` : ''}
                     {user.profile?.city ? ` (${user.profile.city})` : ''}
                   </div>
