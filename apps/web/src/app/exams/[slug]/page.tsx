@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ExamSummary, messagesFa } from '@condorlab/shared';
+import { BookOpen, Users, Flame, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export default function ExamDetailPage() {
   const params = useParams();
@@ -54,7 +55,7 @@ export default function ExamDetailPage() {
   if (error || !exam) {
     return (
       <div className="min-h-screen p-6 max-w-lg mx-auto flex flex-col items-center justify-center text-center">
-        <span className="text-4xl mb-3">⚠️</span>
+        <AlertCircle className="w-12 h-12 text-red-400 mb-3" />
         <h1 className="text-xl font-bold text-white mb-2">خطا در بارگذاری آزمون</h1>
         <p className="text-sm text-gray-400 mb-6">{error || 'آزمون مورد نظر یافت نشد.'}</p>
         <Link href="/exams">
@@ -105,7 +106,7 @@ export default function ExamDetailPage() {
           {/* سرفصل‌های آزمون */}
           <div className="p-6 rounded-2xl bg-[#181818] border border-[#2E2E2E]">
             <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <span>📖</span>
+              <BookOpen className="w-5 h-5 text-[#FFCC00]" />
               <span>سرفصل‌ها و بودجه‌بندی مباحث آزمون</span>
             </h3>
             <ul className="space-y-3 text-xs sm:text-sm text-gray-300">
@@ -133,7 +134,7 @@ export default function ExamDetailPage() {
           {/* طراحان آزمون */}
           <div className="p-6 rounded-2xl bg-[#181818] border border-[#2E2E2E]">
             <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <span>👨‍🏫</span>
+              <Users className="w-5 h-5 text-[#FFCC00]" />
               <span>کادر علمی و طراحان سؤالات</span>
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs sm:text-sm">
@@ -168,7 +169,10 @@ export default function ExamDetailPage() {
             {exam.price > 0 && (
               <div className="p-3.5 rounded-xl bg-[#2B2305] border border-[#FFCC00]/40 text-xs mb-5">
                 <div className="flex items-center justify-between font-bold text-[#FFCC00] mb-1">
-                  <span>🔥 کد تخفیف شکاری:</span>
+                  <div className="flex items-center gap-1.5">
+                    <Flame className="w-4 h-4 text-[#FFCC00]" />
+                    <span>کد تخفیف شکاری:</span>
+                  </div>
                   <span className="font-mono text-sm bg-black/40 px-2 py-0.5 rounded">CAMPBELL50</span>
                 </div>
                 <p className="text-gray-300 text-[11px] leading-relaxed">
@@ -181,12 +185,15 @@ export default function ExamDetailPage() {
             <div className="mb-6 p-4 rounded-xl bg-[#222222] border border-[#383838] text-xs">
               <span className="text-gray-400 block mb-1.5 font-medium">وضعیت ظرفیت و رتبه‌بندی:</span>
               {exam.isCapacityFull ? (
-                <div className="text-amber-400 font-medium leading-relaxed">
-                  ⚠️ سقف صندلی‌های رسمی تکمیل شده است؛ ثبت‌نام شما به‌صورت <strong>آزاد (Open)</strong> بدون رتبه لیدربورد انجام خواهد شد.
+                <div className="text-amber-400 font-medium leading-relaxed flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    سقف صندلی‌های رسمی تکمیل شده است؛ ثبت‌نام شما به‌صورت <strong>آزاد (Open)</strong> بدون رتبه لیدربورد انجام خواهد شد.
+                  </span>
                 </div>
               ) : (
                 <div className="text-green-400 font-medium flex items-center gap-1.5">
-                  <span>✓</span>
+                  <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
                   <span>
                     صندلی رسمی دارای رتبه فعال است
                     {exam.remainingSeats !== undefined && ` (${exam.remainingSeats} صندلی باقی‌مانده)`}
@@ -201,7 +208,7 @@ export default function ExamDetailPage() {
               onClick={() => router.push(`/checkout?examId=${exam.id}`)}
               className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/10"
             >
-              {exam.price === 0 ? '🚀 رزرو فوری صندلی در پایلوت رایگان' : 'ورود به ثبت‌نام و دریافت صندلی'}
+              {exam.price === 0 ? 'رزرو صندلی در آزمون رایگان' : 'ورود به ثبت‌نام و دریافت صندلی'}
             </Button>
 
             <p className="mt-4 text-center text-[11px] text-gray-500 leading-normal">

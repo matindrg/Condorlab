@@ -8,7 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces",
+    "postinstall": "npm run db:generate && npm run build --workspace=@condorlab/database --workspace=@condorlab/shared",
+    "predev": "npm run db:generate && npm run build --workspace=@condorlab/database --workspace=@condorlab/shared",
+    "dev": "node scripts/dev.js",
     "dev:web": "npm run dev --workspace=@condorlab/web",
     "dev:api": "npm run dev --workspace=@condorlab/api",
     "build": "npm run build --workspaces",

@@ -79,3 +79,24 @@ export interface ReportCardSummary {
     status: 'strong' | 'moderate' | 'weak';
   }>;
 }
+
+export interface CheckoutPreview {
+  exam: ExamSummary;
+  accessType: AccessType;
+  totalPrice: number;
+  discountAmount: number;
+  payableAmount: number;
+  couponCode?: string;
+  isHunterCoupon?: boolean;
+  isProfileComplete: boolean;
+  missingProfileFields: string[];
+}
+
+export interface CouponValidationResult {
+  valid: boolean;
+  discountPercent?: number;
+  discountAmount?: number;
+  isHunterCoupon?: boolean;
+  remainingUses?: number;
+  message: string;
+}

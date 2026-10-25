@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ExamSummary, messagesFa } from '@condorlab/shared';
+import { Search, Clock, Calendar, ShieldCheck, ArrowLeft } from 'lucide-react';
 
 const CAMPBELL_FILTERS = [
   { id: 0, label: 'همه آزمون‌ها' },
@@ -59,14 +60,15 @@ export default function ExamsCatalogPage() {
         </div>
 
         {/* جستجو */}
-        <div className="w-full md:w-80">
+        <div className="w-full md:w-80 relative">
           <input
             type="text"
             placeholder="جستجو در آزمون‌های کمپبل..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full min-h-[44px] px-4 rounded-xl bg-[#181818] border border-[#333333] text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00] focus:ring-2 focus:ring-[#FFCC00]/20 transition-all"
+            className="w-full min-h-[44px] pr-10 pl-4 rounded-xl bg-[#181818] border border-[#333333] text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00] focus:ring-2 focus:ring-[#FFCC00]/20 transition-all"
           />
+          <Search className="w-4 h-4 text-gray-500 absolute right-3.5 top-3.5 pointer-events-none" />
         </div>
       </div>
 
@@ -101,7 +103,9 @@ export default function ExamsCatalogPage() {
         </div>
       ) : exams.length === 0 ? (
         <div className="text-center py-20 bg-[#161616] rounded-2xl border border-[#262626]">
-          <span className="text-4xl mb-3 block">🔍</span>
+          <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-3">
+            <Search className="w-6 h-6 text-gray-400" />
+          </div>
           <h3 className="text-lg font-bold text-white mb-2">آزمونی با مشخصات انتخابی یافت نشد</h3>
           <p className="text-sm text-gray-400">لطفاً فیلتر جلد کمپبل را تغییر داده یا عبارت دیگری جستجو فرمایید.</p>
         </div>
@@ -137,15 +141,18 @@ export default function ExamsCatalogPage() {
               {/* متادیتا */}
               <div className="space-y-2 text-xs text-gray-400 mb-6 font-medium">
                 <div className="flex items-center gap-2">
-                  <span>⏱️ مدت پاسخگویی:</span>
+                  <Clock className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                  <span>مدت پاسخگویی:</span>
                   <span className="text-gray-200">{exam.durationMinutes} دقیقه ({exam.totalQuestions} سؤال تستی)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span>📅 تاریخ برگزاری:</span>
+                  <Calendar className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                  <span>تاریخ برگزاری:</span>
                   <span className="text-gray-200">{new Date(exam.startTime).toLocaleDateString('fa-IR')}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span>🛡️ وضعیت پذیرش:</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                  <span>وضعیت پذیرش:</span>
                   <span className="text-green-400 font-semibold">صندلی رسمی دارای رتبه فعال</span>
                 </div>
               </div>
@@ -163,7 +170,7 @@ export default function ExamsCatalogPage() {
                   className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#FFCC00] text-black font-bold text-xs hover:bg-[#E6B800] transition-colors flex items-center gap-1.5"
                 >
                   <span>مشاهده و ثبت‌نام</span>
-                  <span>←</span>
+                  <ArrowLeft className="w-4 h-4" />
                 </Link>
               </div>
             </div>

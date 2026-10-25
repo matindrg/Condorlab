@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { messagesFa, RegisterSchema, StudentGrade } from '@condorlab/shared';
+import { AlertCircle } from 'lucide-react';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -66,7 +67,7 @@ export default function SignupPage() {
       <div className="w-full max-w-lg bg-[#181818] border border-[#2E2E2E] rounded-2xl p-6 sm:p-8 shadow-2xl">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
-            <span className="text-2xl">🧬</span>
+            <img src="/favicon.svg" alt="کندرلب" width={32} height={32} className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
             <span className="text-xl font-black text-white tracking-tight">{messagesFa.common.brandName}</span>
           </Link>
           <h1 className="text-xl sm:text-2xl font-bold text-white mb-2">{messagesFa.auth.signup}</h1>
@@ -74,8 +75,9 @@ export default function SignupPage() {
         </div>
 
         {generalError && (
-          <div className="mb-6 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 font-medium text-right">
-            ⚠️ {generalError}
+          <div className="mb-6 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 font-medium text-right flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{generalError}</span>
           </div>
         )}
 
