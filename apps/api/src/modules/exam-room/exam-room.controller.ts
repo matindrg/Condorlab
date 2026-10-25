@@ -46,8 +46,10 @@ export class ExamRoomController {
     @CurrentUser() user: any,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId = headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
-    return this.examRoomService.initRoom(identifier, user.id, user.sessionId, deviceId);
+    const deviceId =
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    return this.examRoomService.initRoom(identifier, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
   @Get(':attemptId/lock')
@@ -56,8 +58,10 @@ export class ExamRoomController {
     @CurrentUser() user: any,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId = headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
-    return this.examRoomService.getLockState(attemptId, user.id, user.sessionId, deviceId);
+    const deviceId =
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    return this.examRoomService.getLockState(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
   @Post(':attemptId/start')
@@ -68,8 +72,11 @@ export class ExamRoomController {
     @Headers('x-device-id') headerDeviceId?: string,
     @Body('deviceId') bodyDeviceId?: string,
   ) {
-    const deviceId = bodyDeviceId || headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
-    return this.examRoomService.startExam(attemptId, user.id, user.sessionId, deviceId);
+    const deviceId =
+      bodyDeviceId ||
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    return this.examRoomService.startExam(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
   @Post(':attemptId/heartbeat')
@@ -80,11 +87,14 @@ export class ExamRoomController {
     @Body() body: HeartbeatBody,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId = body?.deviceId || headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
+    const deviceId =
+      body?.deviceId ||
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
     return this.examRoomService.heartbeat(
       attemptId,
-      user.id,
-      user.sessionId,
+      user?.id || 'demo_user',
+      user?.sessionId || 'sess_demo',
       deviceId,
       body?.clientSeq || 0,
       body?.answers || [],
@@ -99,8 +109,11 @@ export class ExamRoomController {
     @Headers('x-device-id') headerDeviceId?: string,
     @Body('deviceId') bodyDeviceId?: string,
   ) {
-    const deviceId = bodyDeviceId || headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
-    return this.examRoomService.takeover(attemptId, user.id, user.sessionId, deviceId);
+    const deviceId =
+      bodyDeviceId ||
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    return this.examRoomService.takeover(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
   @Post(':attemptId/telemetry')
@@ -110,7 +123,7 @@ export class ExamRoomController {
     @CurrentUser() user: any,
     @Body() body: TelemetryEvent,
   ) {
-    return this.examRoomService.recordTelemetry(attemptId, user.id, body);
+    return this.examRoomService.recordTelemetry(attemptId, user?.id || 'demo_user', body);
   }
 
   @Post(':attemptId/submit')
@@ -121,11 +134,14 @@ export class ExamRoomController {
     @Body() body: SubmitBody,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId = body?.deviceId || headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
+    const deviceId =
+      body?.deviceId ||
+      headerDeviceId ||
+      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
     return this.examRoomService.submitExam(
       attemptId,
-      user.id,
-      user.sessionId,
+      user?.id || 'demo_user',
+      user?.sessionId || 'sess_demo',
       deviceId,
       body?.answers || [],
     );

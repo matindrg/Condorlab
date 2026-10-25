@@ -71,8 +71,20 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     async function loadRoom() {
       try {
         setIsLoading(true);
+        let did = '';
+        if (typeof window !== 'undefined') {
+          did = localStorage.getItem('condor_device_id') || '';
+          if (!did) {
+            did = `dev_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
+            localStorage.setItem('condor_device_id', did);
+          }
+        }
+
         const res = await fetch(`/api/exam-room/${examIdentifier}/init`, {
           cache: 'no-store',
+          headers: {
+            'x-device-id': did,
+          },
         });
         const data = await res.json();
 

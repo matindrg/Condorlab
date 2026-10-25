@@ -24,6 +24,10 @@ describe('ExamRoomService (Attempt lifecycle & guard checks)', () => {
           id: 'user_artin',
           profile: { firstName: 'آرتین', lastName: 'رضایی', grade: '10' },
         }),
+        findFirst: async () => ({
+          id: 'user_artin',
+          profile: { firstName: 'آرتین', lastName: 'رضایی', grade: '10' },
+        }),
       },
       attempt: {
         findFirst: async () => null,
