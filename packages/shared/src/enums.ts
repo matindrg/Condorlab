@@ -32,6 +32,14 @@ export enum ExamStatus {
   Archived = 'Archived',
 }
 
+export enum ExamCategory {
+  All = 'all',
+  Stage1 = 'stage1',
+  Stage2 = 'stage2',
+  Campbell = 'campbell',
+  Topical = 'topical',
+}
+
 export enum AccessType {
   Official = 'Official',
   Open = 'Open',

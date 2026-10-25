@@ -14,6 +14,8 @@ export class ExamsService {
       id: 'exm-campbell-p1',
       slug: 'campbell-vol1-vol2-pilot-1',
       title: 'شبیه‌ساز جامع جلد ۱ و ۲ بیولوژی کمپبل (پایلوت ۱)',
+      category: 'campbell',
+      labels: ['سرفصلی بیولوژی کمپبل', 'جلد ۱ و ۲: شیمی حیات و سلول'],
       campbellVolumes: [1, 2],
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
@@ -29,6 +31,8 @@ export class ExamsService {
       id: 'exm-campbell-p2',
       slug: 'biology-olympiad-stage-1-pilot-2',
       title: 'آزمون شبیه‌ساز مرحله اول المپیاد زیست‌شناسی (پایلوت ۲)',
+      category: 'stage1',
+      labels: ['شبیه‌ساز مرحله اول المپیاد', 'استاندارد کشوری', 'جامع ۵ جلد کمپبل'],
       campbellVolumes: [1, 2, 3, 4, 5],
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
@@ -44,6 +48,8 @@ export class ExamsService {
       id: 'exm-genetics-adv',
       slug: 'advanced-molecular-genetics',
       title: 'شبیه‌ساز تخصصی ژنتیک مولکولی و مهندسی ژنتیک (مرحله ۲)',
+      category: 'stage2',
+      labels: ['مرحله دوم و تخصصی', 'ژنتیک مولکولی', 'مسئله‌محور'],
       campbellVolumes: [2],
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString(),
@@ -55,37 +61,73 @@ export class ExamsService {
       isCapacityVisible: false,
       officialEnrolledCount: 42,
     },
+    {
+      id: 'exm-campbell-vip',
+      slug: 'campbell-vip-masterclass',
+      title: 'کارگاه فشرده المپیاد زیست‌شناسی (تک‌ظرفیتی VIP)',
+      category: 'campbell',
+      labels: ['کارگاه فشرده', 'تک‌ظرفیتی VIP'],
+      campbellVolumes: [1],
+      status: ExamStatus.Closed,
+      startTime: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+      endTime: new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString(),
+      durationMinutes: 90,
+      totalQuestions: 60,
+      price: 50000,
+      capacity: 2,
+      isCapacityVisible: true,
+      officialEnrolledCount: 2,
+    },
   ];
 
   /**
-   * دریافت شناسه‌ها و اسلاگ‌های تمام آزمون‌های خریداری‌شده توسط کاربر
+   * بارگذاری لیست پایه‌ای آزمون‌ها مستقیماً از دیتابیس (بدون کش مانع، جهت نمایش آنی محصولات جدید در رفرش)
+   */
+  async getBaseExams(): Promise<ExamSummary[]> {
+    try {
+      const exams = await this.prisma.client.exam.findMany({
+        where: {
+          status: { in: ['Published', 'Active', 'Closed'] },
+        },
+        orderBy: { startTime: 'asc' },
+      });
+
+      if (exams && exams.length > 0) {
+        return exams.map((e) => this.mapPrismaExam(e));
+      }
+    } catch (err) {
+      console.warn('⚠️ ناتوانی در واکشی آزمون‌ها از دیتابیس ابری، استفاده از داده‌های پیش‌فرض:', (err as Error).message);
+    }
+
+    return this.mockExams;
+  }
+
+  /**
+   * دریافت شناسه‌ها و اسلاگ‌های تمام آزمون‌های خریداری‌شده توسط کاربر با یک کوئری سریع
    */
   async getUserEnrolledExamIds(userId: string | undefined): Promise<string[]> {
     if (!userId) return [];
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
-      let dbUser: any = null;
-      if (isUuid) {
-        dbUser = await this.prisma.client.user.findUnique({ where: { id: userId } });
-      }
-      if (!dbUser) {
-        dbUser = await this.prisma.client.user.findFirst({ orderBy: { createdAt: 'desc' } });
-      }
+      if (!isUuid) return [];
 
-      if (dbUser) {
-        const attempts = await this.prisma.client.attempt.findMany({
-          where: { userId: dbUser.id },
-          include: { exam: true },
-        });
+      const attempts = await this.prisma.client.attempt.findMany({
+        where: { userId },
+        select: {
+          examId: true,
+          exam: {
+            select: { id: true, slug: true },
+          },
+        },
+      });
 
-        const ids: string[] = [];
-        attempts.forEach((att) => {
-          if (att.examId) ids.push(att.examId);
-          if (att.exam?.id) ids.push(att.exam.id);
-          if (att.exam?.slug) ids.push(att.exam.slug);
-        });
-        return Array.from(new Set(ids));
-      }
+      const ids: string[] = [];
+      attempts.forEach((att) => {
+        if (att.examId) ids.push(att.examId);
+        if (att.exam?.id) ids.push(att.exam.id);
+        if (att.exam?.slug) ids.push(att.exam.slug);
+      });
+      return Array.from(new Set(ids));
     } catch {
       // ignore
     }
@@ -96,103 +138,74 @@ export class ExamsService {
    * بررسی آیا کاربر این آزمون را خریداری کرده یا خیر
    */
   async isUserEnrolled(userId: string | undefined, examId: string): Promise<boolean> {
-    if (!userId) return false;
+    if (!userId || !examId) return false;
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
-      let dbUser: any = null;
-      if (isUuid) {
-        dbUser = await this.prisma.client.user.findUnique({ where: { id: userId } });
-      }
-      if (!dbUser) {
-        dbUser = await this.prisma.client.user.findFirst({ orderBy: { createdAt: 'desc' } });
-      }
-
-      const isExamUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(examId);
-      let dbExam: any = null;
-      if (isExamUuid) {
-        dbExam = await this.prisma.client.exam.findUnique({ where: { id: examId } });
-      }
-      if (!dbExam) {
-        dbExam = await this.prisma.client.exam.findUnique({ where: { slug: examId } });
-      }
-
-      if (dbUser && dbExam) {
-        const attempt = await this.prisma.client.attempt.findUnique({
-          where: {
-            examId_userId: {
-              examId: dbExam.id,
-              userId: dbUser.id,
-            },
-          },
-        });
-        if (attempt) return true;
-      }
+      const enrolled = await this.getUserEnrolledExamIds(userId);
+      return enrolled.includes(examId);
     } catch {
-      // ignore
+      return false;
     }
-    return false;
   }
 
   /**
-   * دریافت لیست آزمون‌های کاتالوگ با فیلتر جلد کمپبل و جستجو
+   * دریافت لیست آزمون‌های کاتالوگ با فیلتر دسته‌بندی، جلد کمپبل و جستجو (بهینه‌سازی شده بدون N+1)
    */
-  async findAll(volume?: number, search?: string, userId?: string): Promise<ExamSummary[]> {
-    let resultExams: ExamSummary[] = [];
+  async findAll(
+    category?: string,
+    volume?: number,
+    search?: string,
+    userId?: string,
+  ): Promise<ExamSummary[]> {
+    const baseExams = await this.getBaseExams();
+    let filtered = [...baseExams];
 
-    try {
-      const exams = await this.prisma.client.exam.findMany({
-        where: {
-          status: { in: ['Published', 'Active', 'Closed'] },
-        },
-        orderBy: { startTime: 'asc' },
-      });
-
-      if (exams && exams.length > 0) {
-        resultExams = exams.map((e) => this.mapPrismaExam(e));
-      }
-    } catch {
-      // استفاده از داده‌های پیش‌فرض در صورت عدم دسترسی به دیتابیس
+    if (category && category !== 'all') {
+      filtered = filtered.filter((e) => e.category === category);
     }
-
-    if (resultExams.length === 0) {
-      let filtered = [...this.mockExams];
-      if (volume) {
-        filtered = filtered.filter((e) => e.campbellVolumes.includes(Number(volume)));
-      }
-      if (search) {
-        const s = search.toLowerCase();
-        filtered = filtered.filter((e) => e.title.toLowerCase().includes(s));
-      }
-      resultExams = filtered;
+    if (volume) {
+      filtered = filtered.filter(
+        (e) => e.campbellVolumes && e.campbellVolumes.includes(Number(volume)),
+      );
     }
-
-    if (userId) {
-      resultExams = await Promise.all(
-        resultExams.map(async (exam) => {
-          const isEnrolled = await this.isUserEnrolled(userId, exam.id || exam.slug);
-          return { ...exam, isEnrolled };
-        }),
+    if (search && search.trim()) {
+      const s = search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (e) =>
+          e.title.toLowerCase().includes(s) ||
+          (e.labels && e.labels.some((l) => l.toLowerCase().includes(s))),
       );
     }
 
-    return resultExams;
+    if (userId) {
+      const enrolledIds = await this.getUserEnrolledExamIds(userId);
+      const enrolledSet = new Set(enrolledIds);
+      filtered = filtered.map((exam) => ({
+        ...exam,
+        isEnrolled: enrolledSet.has(exam.id) || (exam.slug ? enrolledSet.has(exam.slug) : false),
+      }));
+    }
+
+    return filtered;
   }
 
   /**
    * دریافت جزئیات یک آزمون با اسلاگ یکتا و محاسبه وضعیت ظرفیت
    */
   async findBySlug(slug: string, userId?: string): Promise<ExamSummary & { isCapacityFull: boolean; remainingSeats?: number; isEnrolled?: boolean }> {
-    let exam: ExamSummary | undefined;
+    const baseExams = await this.getBaseExams();
+    let exam = baseExams.find((e) => e.slug === slug || e.id === slug);
 
-    try {
-      const dbExam = await this.prisma.client.exam.findUnique({
-        where: { slug },
-      });
-      if (dbExam) {
-        exam = this.mapPrismaExam(dbExam);
+    if (!exam) {
+      try {
+        const dbExam = await this.prisma.client.exam.findUnique({
+          where: { slug },
+        });
+        if (dbExam) {
+          exam = this.mapPrismaExam(dbExam);
+        }
+      } catch {
+        // استفاده از لیست پیش‌فرض
       }
-    } catch {
-      // استفاده از لیست پیش‌فرض
     }
 
     if (!exam) {
@@ -208,7 +221,12 @@ export class ExamsService {
       (exam.capacity ? exam.officialEnrolledCount >= exam.capacity : false);
     const remainingSeats = exam.capacity ? Math.max(0, exam.capacity - exam.officialEnrolledCount) : undefined;
 
-    const isEnrolled = userId ? await this.isUserEnrolled(userId, exam.id || exam.slug) : false;
+    let isEnrolled = false;
+    if (userId) {
+      const enrolledIds = await this.getUserEnrolledExamIds(userId);
+      const enrolledSet = new Set(enrolledIds);
+      isEnrolled = enrolledSet.has(exam.id) || enrolledSet.has(exam.slug);
+    }
 
     return {
       ...exam,
@@ -228,7 +246,9 @@ export class ExamsService {
       id: e.id,
       slug: e.slug,
       title: e.title,
-      campbellVolumes: [1, 2], // پیش‌فرض
+      category: e.category || 'campbell',
+      labels: e.labels || [],
+      campbellVolumes: e.campbellVolumes || [],
       status: e.status as ExamStatus,
       startTime: e.startTime.toISOString(),
       endTime: e.endTime.toISOString(),

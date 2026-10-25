@@ -22,13 +22,14 @@ export class ExamsController {
 
   @Get()
   async getExams(
+    @Query('category') category?: string,
     @Query('volume') volume?: string,
     @Query('search') search?: string,
     @Req() req?: Request,
   ) {
     const volNum = volume ? parseInt(volume, 10) : undefined;
     const userId = req ? this.extractUserId(req) : undefined;
-    const exams = await this.examsService.findAll(volNum, search, userId);
+    const exams = await this.examsService.findAll(category, volNum, search, userId);
     return {
       success: true,
       count: exams.length,

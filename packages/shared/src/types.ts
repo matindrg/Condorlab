@@ -16,6 +16,8 @@ export interface ExamSummary {
   id: string;
   slug: string;
   title: string;
+  category?: string;
+  labels?: string[];
   campbellVolumes: number[];
   status: ExamStatus;
   startTime: string;

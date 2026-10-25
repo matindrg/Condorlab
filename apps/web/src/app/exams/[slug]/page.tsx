@@ -130,14 +130,25 @@ export default function ExamDetailPage() {
         <div className="lg:col-span-2 space-y-6 animate-stagger-1">
           <div>
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              {exam.campbellVolumes.map((v) => (
-                <span
-                  key={v}
-                  className="px-3 py-1 rounded-md bg-[#222222] border border-[#3A3A3A] text-xs text-[#FFCC00] font-bold"
-                >
-                  جلد {v} بیولوژی کمپبل
-                </span>
-              ))}
+              {exam.labels && exam.labels.length > 0 ? (
+                exam.labels.map((lbl, idx) => (
+                  <span
+                    key={idx}
+                    className="px-3 py-1 rounded-md bg-[#222222] border border-[#3A3A3A] text-xs text-[#FFCC00] font-bold"
+                  >
+                    {lbl}
+                  </span>
+                ))
+              ) : exam.campbellVolumes && exam.campbellVolumes.length > 0 ? (
+                exam.campbellVolumes.map((v) => (
+                  <span
+                    key={v}
+                    className="px-3 py-1 rounded-md bg-[#222222] border border-[#3A3A3A] text-xs text-[#FFCC00] font-bold"
+                  >
+                    جلد {v} بیولوژی کمپبل
+                  </span>
+                ))
+              ) : null}
               {userHasEnrolled ? (
                 <span className="px-3 py-1 rounded-md bg-green-500/15 border border-green-500/40 text-green-400 text-xs font-black flex items-center gap-1 shadow-sm">
                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -145,7 +156,7 @@ export default function ExamDetailPage() {
                 </span>
               ) : (
                 <span className="px-3 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium">
-                  استاندارد مرحله اول و دوم المپیاد
+                  استاندارد المپیاد زیست‌شناسی
                 </span>
               )}
             </div>

@@ -165,6 +165,9 @@ model Exam {
   id                    String     @id @default(uuid()) @db.Uuid
   slug                  String     @unique @db.VarChar(128)
   title                 String     @db.VarChar(255)
+  category              String     @default("campbell") @db.VarChar(64) // campbell, stage1, stage2, topical, comprehensive
+  labels                String[]   @default([])                         // برچسب‌ها و نشان‌های موضوعی و مهارتی
+  campbellVolumes       Int[]      @default([]) @map("campbell_volumes") // جلدهای مرتبط در صورت وابستگی به کمپبل
   status                ExamStatus @default(Draft)
   startTime             DateTime   @map("start_time")
   endTime               DateTime   @map("end_time")

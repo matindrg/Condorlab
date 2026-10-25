@@ -7,19 +7,18 @@ import { ExamSummary, messagesFa } from '@condorlab/shared';
 import { Search, Clock, Calendar, ShieldCheck, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 
-const CAMPBELL_FILTERS = [
-  { id: 0, label: 'همه آزمون‌ها' },
-  { id: 1, label: 'جلد ۱: شیمی حیات' },
-  { id: 2, label: 'جلد ۲: سلول و متابولیسم' },
-  { id: 3, label: 'جلد ۳: ژنتیک' },
-  { id: 4, label: 'جلد ۴: سازوکار تکامل' },
-  { id: 5, label: 'جلد ۵: فیزیولوژی گیاهی' },
+const CATEGORY_FILTERS = [
+  { id: 'all', label: 'همه آزمون‌ها' },
+  { id: 'stage1', label: 'شبیه‌ساز مرحله اول' },
+  { id: 'stage2', label: 'مرحله دوم و پیشرفته' },
+  { id: 'campbell', label: 'سرفصلی بیولوژی کمپبل' },
+  { id: 'topical', label: 'موضوعی و تخصصی' },
 ];
 
 export default function ExamsCatalogPage() {
   const { isEnrolled } = useAuth();
-  const [exams, setExams] = useState<ExamSummary[]>([]);
-  const [selectedVolume, setSelectedVolume] = useState<number>(0);
+  const [allExams, setAllExams] = useState<ExamSummary[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isMac, setIsMac] = useState(false);
@@ -42,28 +41,69 @@ export default function ExamsCatalogPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    const fetchExams = async () => {
-      setIsLoading(true);
-      try {
-        const queryParams = new URLSearchParams();
-        if (selectedVolume > 0) queryParams.append('volume', selectedVolume.toString());
-        if (search.trim()) queryParams.append('search', search.trim());
-
-        const res = await fetch(`/api/exams?${queryParams.toString()}`);
-        const data = await res.json();
-        if (data.success) {
-          setExams(data.data);
-        }
-      } catch (err) {
-        console.error('Failed to load exams catalog:', err);
-      } finally {
-        setIsLoading(false);
+  // واکشی آزمون‌ها از سرور: فقط یک‌بار در بارگذاری صفحه یا رفرش مرورگر
+  const fetchExams = React.useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/exams');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setAllExams(data.data);
       }
-    };
+    } catch (err) {
+      console.error('Failed to load exams catalog:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
     fetchExams();
-  }, [selectedVolume, search]);
+  }, [fetchExams]);
+
+  // فیلتر آنی کلاینت‌ساید بر اساس دسته‌بندی و عبارت جستجو (بدون درخواست مجدد شبکه یا لودینگ)
+  const filteredExams = React.useMemo(() => {
+    return allExams.filter((exam) => {
+      // ۱. فیلتر دسته‌بندی و برچسب‌ها
+      if (selectedCategory !== 'all') {
+        const cat = exam.category || '';
+        const labels = exam.labels || [];
+        const hasVol = exam.campbellVolumes && exam.campbellVolumes.length > 0;
+
+        let matches = false;
+        if (selectedCategory === 'stage1') {
+          matches = cat === 'stage1' || labels.some((l) => l.includes('مرحله اول'));
+        } else if (selectedCategory === 'stage2') {
+          matches = cat === 'stage2' || labels.some((l) => l.includes('مرحله دوم') || l.includes('پیشرفته'));
+        } else if (selectedCategory === 'campbell') {
+          matches = cat === 'campbell' || hasVol || labels.some((l) => l.includes('کمپبل') || l.includes('سرفصلی'));
+        } else if (selectedCategory === 'topical') {
+          matches =
+            cat === 'topical' ||
+            labels.some((l) => l.includes('تخصصی') || l.includes('موضوعی') || l.includes('VIP') || l.includes('کارگاه'));
+        } else {
+          matches = cat === selectedCategory;
+        }
+
+        if (!matches) return false;
+      }
+
+      // ۲. فیلتر متنی جستجو
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        const matchesTitle = exam.title.toLowerCase().includes(q);
+        const matchesLabels = exam.labels?.some((l) => l.toLowerCase().includes(q));
+        const matchesVolumes = exam.campbellVolumes?.some(
+          (v) => v.toString().includes(q) || `جلد ${v}`.includes(q),
+        );
+        if (!matchesTitle && !matchesLabels && !matchesVolumes) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [allExams, selectedCategory, search]);
 
   return (
     <div className="min-h-screen p-4 sm:p-8 max-w-7xl mx-auto">
@@ -88,7 +128,7 @@ export default function ExamsCatalogPage() {
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="جستجو در آزمون‌های کمپبل..."
+            placeholder="جستجو در نام آزمون یا برچسب‌ها..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full min-h-[44px] pr-10 pl-16 rounded-xl bg-[#181818] border border-[#333333] group-hover:border-[#FFCC00]/50 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00] focus:ring-2 focus:ring-[#FFCC00]/20 transition-all"
@@ -107,14 +147,14 @@ export default function ExamsCatalogPage() {
         </div>
       </div>
 
-      {/* فیلترهای سرفصل کمپبل */}
+      {/* فیلترهای دسته‌بندی هوشمند */}
       <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 no-scrollbar">
-        {CAMPBELL_FILTERS.map((f) => (
+        {CATEGORY_FILTERS.map((f) => (
           <button
             key={f.id}
-            onClick={() => setSelectedVolume(f.id)}
+            onClick={() => setSelectedCategory(f.id)}
             className={`min-h-[40px] px-4 py-2 rounded-xl text-xs sm:text-sm font-medium whitespace-nowrap transition-all duration-200 select-none ${
-              selectedVolume === f.id
+              selectedCategory === f.id
                 ? 'bg-[#FFCC00] text-black font-bold shadow-md shadow-[#FFCC00]/10'
                 : 'bg-[#181818] text-gray-400 hover:text-white border border-[#2E2E2E]'
             }`}
@@ -150,17 +190,17 @@ export default function ExamsCatalogPage() {
             </div>
           ))}
         </div>
-      ) : exams.length === 0 ? (
+      ) : filteredExams.length === 0 ? (
         <div className="text-center py-20 bg-[#161616] rounded-2xl border border-[#262626]">
           <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-3">
             <Search className="w-6 h-6 text-gray-400" />
           </div>
           <h3 className="text-lg font-bold text-white mb-2">آزمونی با مشخصات انتخابی یافت نشد</h3>
-          <p className="text-sm text-gray-400">لطفاً فیلتر جلد کمپبل را تغییر داده یا عبارت دیگری جستجو فرمایید.</p>
+          <p className="text-sm text-gray-400">لطفاً فیلتر دسته‌بندی را تغییر داده یا عبارت دیگری جستجو فرمایید.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {exams.map((exam, index) => {
+          {filteredExams.map((exam, index) => {
             const userHasEnrolled = exam.isEnrolled || isEnrolled(exam.id) || isEnrolled(exam.slug);
             return (
               <div
@@ -171,17 +211,28 @@ export default function ExamsCatalogPage() {
                     : 'border-[#2E2E2E] hover:border-[#FFCC00]/50'
                 } p-6 transition-all duration-300 hover:-translate-y-1 shadow-xl hover:shadow-[#FFCC00]/5 text-right animate-stagger-${Math.min(index + 1, 4)}`}
               >
-                {/* نشان جلدها و وضعیت */}
+                {/* نشان‌ها، برچسب‌های دسته‌بندی و وضعیت صندلی */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    {exam.campbellVolumes.map((v) => (
-                      <span
-                        key={v}
-                        className="px-2.5 py-1 rounded-md bg-[#252525] border border-[#3A3A3A] text-[11px] text-[#FFCC00] font-medium"
-                      >
-                        جلد {v} کمپبل
-                      </span>
-                    ))}
+                    {exam.labels && exam.labels.length > 0 ? (
+                      exam.labels.map((lbl, lIdx) => (
+                        <span
+                          key={lIdx}
+                          className="px-2.5 py-1 rounded-md bg-[#252525] border border-[#3A3A3A] text-[11px] text-[#FFCC00] font-medium"
+                        >
+                          {lbl}
+                        </span>
+                      ))
+                    ) : exam.campbellVolumes && exam.campbellVolumes.length > 0 ? (
+                      exam.campbellVolumes.map((v) => (
+                        <span
+                          key={v}
+                          className="px-2.5 py-1 rounded-md bg-[#252525] border border-[#3A3A3A] text-[11px] text-[#FFCC00] font-medium"
+                        >
+                          جلد {v} کمپبل
+                        </span>
+                      ))
+                    ) : null}
                   </div>
                   {userHasEnrolled ? (
                     <span className="px-2.5 py-1 rounded-md bg-green-500/15 border border-green-500/40 text-green-400 text-xs font-black flex items-center gap-1 shadow-sm shadow-green-500/10">

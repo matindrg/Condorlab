@@ -13,6 +13,8 @@ import {
   ChevronDown,
   Search,
 } from 'lucide-react';
+import { LogoutDialog } from '@/components/logout-dialog';
+import { toast } from '@/components/ui/toast';
 
 export interface AuthUser {
   id: string;
@@ -37,6 +39,8 @@ export function Navbar() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
@@ -159,21 +163,34 @@ export function Navbar() {
     };
   }, [isDropdownOpen, isMenuOpen]);
 
-  const handleLogout = async () => {
+  const handleLogoutConfirmed = async () => {
+    setIsLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-    } catch {}
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
 
     try {
       localStorage.removeItem('condor_user');
+      localStorage.removeItem('condor_enrolled_exams');
     } catch {}
 
     window.dispatchEvent(new Event('condor_auth_change'));
     setUser(null);
+    setIsLogoutDialogOpen(false);
+    setIsLoggingOut(false);
     setIsDropdownOpen(false);
     setIsMenuOpen(false);
-    router.push('/');
-    router.refresh();
+
+    toast.success('با موفقیت خارج شدید', 'از همراهی شما با کندرلب سپاسگزاریم.');
+
+    // اگر کاربر داخل داشبورد یا تسویه‌حساب باشد، به صفحه اصلی هدایت می‌شود
+    if (pathname?.startsWith('/student') || pathname?.startsWith('/checkout')) {
+      router.push('/');
+    } else {
+      router.refresh();
+    }
   };
 
   const navLinks = [
@@ -293,7 +310,10 @@ export function Navbar() {
 
                   <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      setIsLogoutDialogOpen(true);
+                    }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors font-medium text-right"
                   >
                     <LogOut className="w-4 h-4" />
@@ -385,7 +405,10 @@ export function Navbar() {
 
                 <button
                   type="button"
-                  onClick={handleLogout}
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsLogoutDialogOpen(true);
+                  }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-right"
                 >
                   <LogOut className="w-4 h-4" />
@@ -431,6 +454,13 @@ export function Navbar() {
           </nav>
         </div>
       )}
+
+      <LogoutDialog
+        isOpen={isLogoutDialogOpen}
+        isLoading={isLoggingOut}
+        onClose={() => setIsLogoutDialogOpen(false)}
+        onConfirm={handleLogoutConfirmed}
+      />
     </header>
   );
 }

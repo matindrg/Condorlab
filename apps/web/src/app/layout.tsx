@@ -3,6 +3,7 @@ import './globals.css';
 import { Navbar } from '@/components/navbar';
 import { GlobalSearchDialog } from '@/components/global-search-dialog';
 import { AuthProvider } from '@/context/auth-context';
+import { ToastProvider } from '@/components/ui/toast';
 
 export const metadata: Metadata = {
   title: {
@@ -29,11 +30,13 @@ export default function RootLayout({
   return (
     <html lang="fa" dir="rtl">
       <body className="bg-[#121212] text-[#F3F4F6] min-h-screen antialiased selection:bg-[#FFCC00] selection:text-black font-sans flex flex-col">
-        <AuthProvider>
-          <Navbar />
-          <GlobalSearchDialog />
-          <main className="flex-1">{children}</main>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <Navbar />
+            <GlobalSearchDialog />
+            <main className="flex-1">{children}</main>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );

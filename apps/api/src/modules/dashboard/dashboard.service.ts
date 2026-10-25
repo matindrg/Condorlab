@@ -9,6 +9,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-campbell-p1',
     slug: 'campbell-vol1-vol2-pilot-1',
     title: 'شبیه‌ساز جامع جلد ۱ و ۲ بیولوژی کمپبل (پایلوت ۱)',
+    category: 'campbell',
+    labels: ['سرفصلی بیولوژی کمپبل', 'جلد ۱ و ۲: شیمی حیات و سلول'],
     campbellVolumes: [1, 2],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
@@ -24,6 +26,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-campbell-p2',
     slug: 'biology-olympiad-stage-1-pilot-2',
     title: 'آزمون شبیه‌ساز مرحله اول المپیاد زیست‌شناسی (پایلوت ۲)',
+    category: 'stage1',
+    labels: ['شبیه‌ساز مرحله اول المپیاد', 'استاندارد کشوری', 'جامع ۵ جلد کمپبل'],
     campbellVolumes: [1, 2, 3, 4, 5],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
@@ -39,6 +43,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-genetics-adv',
     slug: 'advanced-molecular-genetics',
     title: 'شبیه‌ساز تخصصی ژنتیک مولکولی و مهندسی ژنتیک (مرحله ۲)',
+    category: 'stage2',
+    labels: ['مرحله دوم و تخصصی', 'ژنتیک مولکولی', 'مسئله‌محور'],
     campbellVolumes: [2],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString(),
@@ -97,18 +103,8 @@ export class DashboardService {
           },
         });
       }
-
-      if (!dbUser) {
-        dbUser = await this.prisma.client.user.findFirst({
-          orderBy: { createdAt: 'desc' },
-          include: {
-            profile: true,
-            identities: true,
-          },
-        });
-      }
-    } catch {
-      // در صورت آفلاین بودن دیتابیس
+    } catch (e) {
+      console.warn('⚠️ خطای دریافت کاربر از دیتابیس:', (e as Error).message);
     }
 
     // اگر در دیتابیس نبود، بررسی کاربران درون‌حافظه
@@ -117,21 +113,10 @@ export class DashboardService {
     }
 
     if (!dbUser) {
-      // ساخت یک مدل نمایشی پیش‌فرض برای سشن مهمان
-      const memProfile = this.checkoutService.getInMemoryProfile(userId);
-      dbUser = {
-        id: userId,
-        role: 'Student',
-        status: 'Active',
-        createdAt: new Date().toISOString(),
-        profile: {
-          firstName: 'داوطلب',
-          lastName: 'المپیاد',
-          grade: memProfile?.grade || '10',
-          school: memProfile?.school || 'نامشخص',
-          city: memProfile?.city || 'نامشخص',
-          phoneNumber: memProfile?.phoneNumber || '',
-        },
+      return {
+        user: null,
+        purchasedProducts: [],
+        totalPurchases: 0,
       };
     }
 
@@ -144,45 +129,49 @@ export class DashboardService {
       if (emailIdent) email = emailIdent.identifier;
     }
 
-    // استخراج محصولات و آزمون‌های خریداری‌شده
+    // استخراج محصولات و آزمون‌های خریداری‌شده صرفاً از دیتابیس PostgreSQL
     const purchasedProducts: PurchasedProductItem[] = [];
-    const seenExamKeys = new Set<string>();
 
-    // ۱. استخراج از جدول Attempts دیتابیس
     try {
       if (dbUser.id && this.isUuid(dbUser.id)) {
-        const attempts = await this.prisma.client.attempt.findMany({
-          where: { userId: dbUser.id },
-          include: { exam: true },
-          orderBy: { startedAt: 'desc' },
-        });
-
-        // همچنین سفارش‌های مالی برای به دست آوردن شماره سفارش و مبلغ پرداخت شده
-        const orders = await this.prisma.client.order.findMany({
-          where: { userId: dbUser.id },
-          orderBy: { createdAt: 'desc' },
-        });
+        const [attempts, orders, ledgerEntries] = await Promise.all([
+          this.prisma.client.attempt.findMany({
+            where: { userId: dbUser.id },
+            include: { exam: true },
+            orderBy: { startedAt: 'desc' },
+          }),
+          this.prisma.client.order.findMany({
+            where: { userId: dbUser.id },
+            orderBy: { createdAt: 'desc' },
+          }),
+          this.prisma.client.ledgerEntry.findMany({
+            where: { userId: dbUser.id },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ]);
 
         for (const att of attempts) {
           const exam = att.exam;
           if (!exam) continue;
 
-          seenExamKeys.add(exam.id);
-          seenExamKeys.add(exam.slug);
-
-          // تطبیق با ماک کاتالوگ در صورت نیاز به جلدهای کمپبل
+          // تطبیق با ماک کاتالوگ برای متادیتاهای تکمیلی (در صورت نبود در جدول آزمون)
           const mockMatch = MOCK_CATALOG_EXAMS.find(
             (m) => m.slug === exam.slug || m.id === exam.id,
           );
 
-          // یافتن شماره سفارش مرتبط
-          const matchingOrder = orders[0];
+          // یافتن تراکنش مالی و سفارش دقیق مرتبط با این آزمون
+          const matchingLedger = ledgerEntries.find(
+            (l) => l.description.includes(exam.title) || l.description.includes(exam.slug),
+          );
+          const matchingOrder = matchingLedger
+            ? orders.find((o) => o.id === matchingLedger.orderId)
+            : orders.find((o) => o.createdAt <= att.startedAt) || orders[0];
 
           purchasedProducts.push({
             id: att.id,
             title: exam.title,
             slug: exam.slug,
-            type: 'آزمون شبیه‌ساز',
+            type: exam.category === 'stage2' ? 'شبیه‌ساز تخصصی مرحله ۲' : 'آزمون شبیه‌ساز',
             orderNumber: matchingOrder?.orderNumber || `ORD-${att.id.slice(0, 8).toUpperCase()}`,
             price: exam.price,
             payableAmount: matchingOrder?.payableAmount ?? exam.price,
@@ -191,47 +180,17 @@ export class DashboardService {
             purchasedAt: att.startedAt?.toISOString() || new Date().toISOString(),
             durationMinutes: exam.durationMinutes,
             totalQuestions: mockMatch?.totalQuestions || 60,
-            campbellVolumes: mockMatch?.campbellVolumes || [1, 2],
-            startTime: exam.startTime?.toISOString(),
-            endTime: exam.endTime?.toISOString(),
+            campbellVolumes:
+              exam.campbellVolumes && exam.campbellVolumes.length > 0
+                ? exam.campbellVolumes
+                : (mockMatch?.campbellVolumes || [1, 2]),
+            startTime: exam.startTime?.toISOString() || mockMatch?.startTime,
+            endTime: exam.endTime?.toISOString() || mockMatch?.endTime,
           });
         }
       }
     } catch (e) {
       console.warn('⚠️ خطای دریافت آزمون‌ها از جدول Attempts:', (e as Error).message);
-    }
-
-    // ۲. بررسی خریدهای ثبت شده در حافظه سشن کلاینت (CheckoutService)
-    const memPurchasedIds = this.checkoutService.getPurchasedExamIds(userId);
-    for (const examIdOrSlug of memPurchasedIds) {
-      if (seenExamKeys.has(examIdOrSlug)) continue;
-
-      const mockMatch = MOCK_CATALOG_EXAMS.find(
-        (m) => m.id === examIdOrSlug || m.slug === examIdOrSlug,
-      );
-
-      if (mockMatch) {
-        seenExamKeys.add(mockMatch.id);
-        seenExamKeys.add(mockMatch.slug);
-
-        purchasedProducts.push({
-          id: `mem-${mockMatch.id}`,
-          title: mockMatch.title,
-          slug: mockMatch.slug,
-          type: 'آزمون شبیه‌ساز',
-          orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
-          price: mockMatch.price,
-          payableAmount: mockMatch.price,
-          status: 'in_progress',
-          accessType: 'رسمی (با رتبه)',
-          purchasedAt: new Date().toISOString(),
-          durationMinutes: mockMatch.durationMinutes,
-          totalQuestions: mockMatch.totalQuestions,
-          campbellVolumes: mockMatch.campbellVolumes,
-          startTime: mockMatch.startTime,
-          endTime: mockMatch.endTime,
-        });
-      }
     }
 
     return {

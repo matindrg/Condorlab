@@ -72,13 +72,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (enrollmentsRes && enrollmentsRes.ok) {
         const enrollData = await enrollmentsRes.json();
         if (enrollData.success && Array.isArray(enrollData.enrolledExamIds)) {
-          setEnrolledExamIds((prev) => {
-            const combined = Array.from(new Set([...prev, ...enrollData.enrolledExamIds]));
-            try {
-              localStorage.setItem(STORAGE_ENROLLED_KEY, JSON.stringify(combined));
-            } catch {}
-            return combined;
-          });
+          setEnrolledExamIds(enrollData.enrolledExamIds);
+          try {
+            localStorage.setItem(STORAGE_ENROLLED_KEY, JSON.stringify(enrollData.enrolledExamIds));
+          } catch {}
         }
       }
     } catch {

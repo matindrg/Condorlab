@@ -5,9 +5,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ExamsModule } from './modules/exams/exams.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ExamRoomModule } from './modules/exam-room/exam-room.module';
 
 @Module({
-  imports: [PrismaModule, RedisModule, AuthModule, ExamsModule, CheckoutModule, DashboardModule],
+  imports: [PrismaModule, RedisModule, AuthModule, ExamsModule, CheckoutModule, DashboardModule, ExamRoomModule],
   controllers: [],
   providers: [],
 })

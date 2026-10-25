@@ -15,6 +15,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-campbell-p1',
     slug: 'campbell-vol1-vol2-pilot-1',
     title: 'شبیه‌ساز جامع جلد ۱ و ۲ بیولوژی کمپبل (پایلوت ۱)',
+    category: 'campbell',
+    labels: ['سرفصلی بیولوژی کمپبل', 'جلد ۱ و ۲: شیمی حیات و سلول'],
     campbellVolumes: [1, 2],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
@@ -30,6 +32,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-campbell-p2',
     slug: 'biology-olympiad-stage-1-pilot-2',
     title: 'آزمون شبیه‌ساز مرحله اول المپیاد زیست‌شناسی (پایلوت ۲)',
+    category: 'stage1',
+    labels: ['شبیه‌ساز مرحله اول المپیاد', 'استاندارد کشوری', 'جامع ۵ جلد کمپبل'],
     campbellVolumes: [1, 2, 3, 4, 5],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
@@ -45,6 +49,8 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     id: 'exm-genetics-adv',
     slug: 'advanced-molecular-genetics',
     title: 'شبیه‌ساز تخصصی ژنتیک مولکولی و مهندسی ژنتیک (مرحله ۲)',
+    category: 'stage2',
+    labels: ['مرحله دوم و تخصصی', 'ژنتیک مولکولی', 'مسئله‌محور'],
     campbellVolumes: [2],
     status: ExamStatus.Published,
     startTime: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString(),
@@ -162,11 +168,7 @@ export class CheckoutService {
         });
         if (user) return user;
       }
-
-      // در صورت نبود سشن یا کاربر، آخرین کاربر ساخته شده را جهت محیط تست برمی‌گرداند
-      return await this.prisma.client.user.findFirst({
-        orderBy: { createdAt: 'desc' },
-      });
+      return null;
     } catch {
       return null;
     }
@@ -201,7 +203,9 @@ export class CheckoutService {
           id: dbExam.id,
           slug: dbExam.slug,
           title: dbExam.title,
-          campbellVolumes: [1, 2],
+          category: dbExam.category || 'campbell',
+          labels: dbExam.labels || [],
+          campbellVolumes: dbExam.campbellVolumes || [],
           status: dbExam.status as ExamStatus,
           startTime: dbExam.startTime.toISOString(),
           endTime: dbExam.endTime.toISOString(),
@@ -222,12 +226,11 @@ export class CheckoutService {
   }
 
   /**
-   * بررسی خرید قبلی آزمون توسط کاربر
+   * بررسی خرید قبلی آزمون توسط کاربر مستقیماً از PostgreSQL
    */
   async checkUserPurchased(userId: string, examId: string): Promise<boolean> {
-    const memoryKey = `${userId}:${examId}`;
-    if (this.inMemoryPurchased.has(memoryKey)) {
-      return true;
+    if (!userId || !this.isUuid(userId)) {
+      return false;
     }
 
     try {
@@ -244,7 +247,6 @@ export class CheckoutService {
           },
         });
         if (attempt) {
-          this.inMemoryPurchased.add(memoryKey);
           return true;
         }
       }
@@ -512,12 +514,18 @@ export class CheckoutService {
 
     const orderNumber = `ORD-${Date.now().toString().slice(-8)}`;
 
+    const dbUser = await this.resolveUser(userId);
+    if (!dbUser) {
+      throw new BadRequestException('برای تکمیل ثبت‌نام و رزرو صندلی، ابتدا وارد حساب کاربری خود شوید.');
+    }
+
+    const dbExam = await this.ensureDbExam(examId);
+    if (!dbExam) {
+      throw new BadRequestException('مشخصات آزمون در پایگاه داده یافت نشد.');
+    }
+
     // ذخیره قطعی در PostgreSQL (Supabase)
     try {
-      const dbUser = await this.resolveUser(userId);
-      const dbExam = await this.ensureDbExam(examId);
-
-      if (dbUser && dbExam) {
         // ۱. بررسی یا ایجاد کوپن در جدول Coupons
         let dbCoupon: any = null;
         if (couponCode) {
@@ -605,19 +613,9 @@ export class CheckoutService {
         }
 
         console.log(`✅ سفارش ${orderNumber} و صندلی آزمون در دیتابیس Supabase ثبت شد.`);
+      } catch (err) {
+        console.error('❌ خطا در ذخیره سفارش در دیتابیس:', (err as Error).message);
       }
-    } catch (err) {
-      console.error('❌ خطا در ذخیره سفارش در دیتابیس:', (err as Error).message);
-    }
-
-    // ثبت در حافظه محلی برای اطمینان از ممانعت فوری
-    this.inMemoryPurchased.add(`${userId}:${examId}`);
-    if (preview.exam?.id) {
-      this.inMemoryPurchased.add(`${userId}:${preview.exam.id}`);
-    }
-    if (preview.exam?.slug) {
-      this.inMemoryPurchased.add(`${userId}:${preview.exam.slug}`);
-    }
 
     return {
       success: true,

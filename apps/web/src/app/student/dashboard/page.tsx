@@ -89,56 +89,27 @@ export default function StudentDashboardPage() {
         const json = await res.json();
         if (json.success && json.data) {
           const u = json.data.user;
-          const userProf: UserProfile = {
-            firstName: u.profile?.firstName || authUser?.profile?.firstName || '',
-            lastName: u.profile?.lastName || authUser?.profile?.lastName || '',
-            fullName:
-              u.profile?.fullName ||
-              `${u.profile?.firstName || ''} ${u.profile?.lastName || ''}`.trim() ||
-              'داوطلب المپیاد',
-            phoneNumber: u.profile?.phoneNumber || authUser?.profile?.phoneNumber || '',
-            grade: u.profile?.grade || authUser?.profile?.grade || '10',
-            school: u.profile?.school || authUser?.profile?.school || 'نامشخص',
-            city: u.profile?.city || authUser?.profile?.city || 'نامشخص',
-            email: u.email || authUser?.email || '',
-            role: u.role || authUser?.role || 'Student',
-            createdAt: u.createdAt || authUser?.createdAt,
-          };
-          setProfile(userProf);
-
-          // ادغام محصولات دریافتی از سرور با آزمون‌های ثبت‌نامی محلی
-          let fetchedProducts: PurchasedProduct[] = json.data.purchasedProducts || [];
-          const existingSlugs = new Set(fetchedProducts.map((p) => p.slug));
-
-          // بررسی آیا آزمونی در کش لوکال است که در خروجی نیامده
-          if (Array.isArray(enrolledExamIds)) {
-            for (const enrolledId of enrolledExamIds) {
-              const matchedExam = INITIAL_CATALOG_EXAMS.find(
-                (e) => e.id === enrolledId || e.slug === enrolledId,
-              );
-              if (matchedExam && !existingSlugs.has(matchedExam.slug)) {
-                existingSlugs.add(matchedExam.slug);
-                fetchedProducts.push({
-                  id: matchedExam.id,
-                  title: matchedExam.title,
-                  slug: matchedExam.slug,
-                  type: 'آزمون شبیه‌ساز',
-                  orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
-                  price: matchedExam.price,
-                  payableAmount: matchedExam.price,
-                  status: 'in_progress',
-                  accessType: 'رسمی (با رتبه)',
-                  purchasedAt: new Date().toISOString(),
-                  durationMinutes: matchedExam.durationMinutes,
-                  totalQuestions: matchedExam.totalQuestions,
-                  campbellVolumes: matchedExam.campbellVolumes,
-                  startTime: matchedExam.startTime,
-                  endTime: matchedExam.endTime,
-                });
-              }
-            }
+          if (u) {
+            const userProf: UserProfile = {
+              firstName: u.profile?.firstName || authUser?.profile?.firstName || '',
+              lastName: u.profile?.lastName || authUser?.profile?.lastName || '',
+              fullName:
+                u.profile?.fullName ||
+                `${u.profile?.firstName || ''} ${u.profile?.lastName || ''}`.trim() ||
+                'داوطلب المپیاد',
+              phoneNumber: u.profile?.phoneNumber || authUser?.profile?.phoneNumber || '',
+              grade: u.profile?.grade || authUser?.profile?.grade || '10',
+              school: u.profile?.school || authUser?.profile?.school || 'نامشخص',
+              city: u.profile?.city || authUser?.profile?.city || 'نامشخص',
+              email: u.email || authUser?.email || '',
+              role: u.role || authUser?.role || 'Student',
+              createdAt: u.createdAt || authUser?.createdAt,
+            };
+            setProfile(userProf);
           }
 
+          // دریافت قطعی محصولات خریداری‌شده از سرور دیتابیس
+          const fetchedProducts: PurchasedProduct[] = json.data.purchasedProducts || [];
           setProducts(fetchedProducts);
           return;
         }
