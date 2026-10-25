@@ -38,13 +38,10 @@ out/
 .vite/
 
 # ─── ویرایشگرها ─────────────────────────────────────────────
-.vscode/*
-!.vscode/settings.json
-!.vscode/prd-rtl.css
-!.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/tasks.json
+.vscode/
 .idea/
+.obsidian/
+obsidian/
 *.swp
 *~
 
