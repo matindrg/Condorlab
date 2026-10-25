@@ -231,8 +231,8 @@ export function useExamHeartbeat({
   /**
    * تصاحب قفل از دستگاه دیگر با کسر سهمیه
    */
-  const takeoverExam = useCallback(async () => {
-    if (!attemptId || !deviceId) return;
+  const takeoverExam = useCallback(async (): Promise<boolean> => {
+    if (!attemptId || !deviceId) return false;
     try {
       const res = await fetch(`/api/exam-room/${attemptId}/takeover`, {
         method: 'POST',
@@ -367,6 +367,30 @@ export function useExamHeartbeat({
     }
   }, [attemptId, deviceId, answers, onSubmitted]);
 
+  /**
+   * ارسال رویدادهای تله‌متری رفتاری ضدتقلب
+   */
+  const sendTelemetry = useCallback(
+    async (event: {
+      eventType: 'TAB_BLUR' | 'TAB_HIDDEN' | 'WINDOW_BLUR' | 'FULLSCREEN_EXIT' | 'CONTEXT_MENU' | 'COPY_ATTEMPT';
+      startedAt: number;
+      durationMs?: number;
+      details?: Record<string, unknown>;
+    }) => {
+      if (!attemptId) return;
+      try {
+        fetch(`/api/exam-room/${attemptId}/telemetry`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(event),
+        }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    },
+    [attemptId],
+  );
+
   // چرخه اجرای خودکار هارت‌بیت هر ۳۰ ثانیه
   useEffect(() => {
     if (!enabled || !attemptId || !deviceId || status === 'submitted' || status === 'lock_lost') {
@@ -397,6 +421,7 @@ export function useExamHeartbeat({
     sendHeartbeat,
     takeoverExam,
     submitExam,
+    sendTelemetry,
     setTakeoverInfo,
   };
 }
