@@ -1,0 +1,22 @@
+{
+  "name": "condorlab",
+  "version": "1.0.0",
+  "description": "> **مخزن اسناد جامع محصول، معماری فنی، مشخصات امنیتی و نمونه‌ی فنی قفل آزمون**   > پلتفرم تخصصی سنجش تحلیلی، آزمون‌های جلد‌به‌جلد کمپبل و آموزش نخبگانی المپیاد زیست‌شناسی ایران.",
+  "main": "index.js",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matindrg/Condorlab.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/matindrg/Condorlab/issues"
+  },
+  "homepage": "https://github.com/matindrg/Condorlab#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5"
+  }
+}

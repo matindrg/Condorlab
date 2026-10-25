@@ -37,11 +37,12 @@ pnpm-debug.log*
 out/
 .vite/
 
-# ─── ویرایشگرها ─────────────────────────────────────────────
+# ─── ویرایشگرها و ابزارهای محلی ─────────────────────────────────
 .vscode/
 .idea/
 .obsidian/
 obsidian/
+.agents/
 *.swp
 *~
 
@@ -70,3 +71,10 @@ dump.rdb
 design/.cache/
 *.sketch~
 *.ai~
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
