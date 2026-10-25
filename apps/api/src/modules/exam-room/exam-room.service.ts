@@ -1,6 +1,18 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ExamLockService, StoredAnswer, LockContext } from './exam-lock.service';
+import {
+  ExamLockService,
+  StoredAnswer,
+  LockContext,
+  TelemetryEvent,
+  LockState,
+} from './exam-lock.service';
 import { CAMPBELL_PILOT_QUESTIONS } from './exam-questions.mock';
 import { ExamStatus } from '@condorlab/shared';
 
@@ -113,6 +125,7 @@ export class ExamRoomService {
    * شروع رسمی و دریافت قفل فعال نشست در اتاق آزمون
    */
   async startExam(attemptId: string, userId: string, sessionId: string, deviceId: string) {
+    await this.assertAttemptAccess(attemptId, userId);
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     return this.examLock.acquire(ctx);
   }
@@ -128,6 +141,7 @@ export class ExamRoomService {
     clientSeq: number,
     answers: StoredAnswer[] = [],
   ) {
+    await this.assertAttemptAccess(attemptId, userId);
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     const result = await this.examLock.heartbeat(ctx, clientSeq, answers);
 
@@ -145,10 +159,11 @@ export class ExamRoomService {
    * تصاحب قفل از دستگاه قبلی توسط دستگاه جدید
    */
   async takeover(attemptId: string, userId: string, sessionId: string, deviceId: string) {
+    await this.assertAttemptAccess(attemptId, userId);
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     const result = await this.examLock.takeover(ctx);
 
-    // به‌روزرسانی شمارنده takeover در دیتابیس
+    // به‌روزرسانی شمارنده takeover در دیتابیس Postgres
     try {
       await this.prisma.client.attempt.update({
         where: { id: attemptId },
@@ -162,6 +177,24 @@ export class ExamRoomService {
   }
 
   /**
+   * دریافت وضعیت زنده قفل
+   */
+  async getLockState(attemptId: string, userId: string, sessionId: string, deviceId: string): Promise<LockState> {
+    await this.assertAttemptAccess(attemptId, userId, true);
+    const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
+    return this.examLock.getState(ctx);
+  }
+
+  /**
+   * ثبت نامحسوس رخداد ضد تقلب
+   */
+  async recordTelemetry(attemptId: string, userId: string, event: TelemetryEvent): Promise<{ success: boolean }> {
+    await this.assertAttemptAccess(attemptId, userId, true);
+    await this.examLock.recordTelemetry(attemptId, event);
+    return { success: true };
+  }
+
+  /**
    * ثبت نهایی پاسخ‌برگ و اتمام قطعی آزمون
    */
   async submitExam(
@@ -171,6 +204,16 @@ export class ExamRoomService {
     deviceId: string,
     answers: StoredAnswer[] = [],
   ) {
+    const attempt = await this.assertAttemptAccess(attemptId, userId, true);
+    if (attempt.status === 'submitted') {
+      return {
+        success: true,
+        status: 'already_submitted',
+        message: 'این آزمون قبلاً ثبت نهایی شده است.',
+        submittedAt: attempt.submittedAt?.toISOString(),
+      };
+    }
+
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     await this.examLock.assertOwner(ctx);
 
@@ -201,6 +244,7 @@ export class ExamRoomService {
 
     return {
       success: true,
+      status: 'submitted',
       message: 'پاسخ‌برگ شما با موفقیت ثبت نهایی شد و آزمون به پایان رسید.',
       submittedAt: submittedAt.toISOString(),
       summary: {
@@ -210,6 +254,41 @@ export class ExamRoomService {
         flaggedCount,
       },
     };
+  }
+
+  /**
+   * بررسی اصالت شرکت در آزمون، مالکیت داوطلب و عدم پایان آزمون
+   */
+  private async assertAttemptAccess(attemptId: string, userId: string, allowSubmitted = false) {
+    const attempt = await this.prisma.client.attempt.findUnique({
+      where: { id: attemptId },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'ATTEMPT_NOT_FOUND',
+        message: 'نشست آزمون مورد نظر یافت نشد.',
+      });
+    }
+
+    if (attempt.userId !== userId) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'FORBIDDEN',
+        message: 'شما مجاز به دسترسی به آزمون کاربر دیگری نیستید.',
+      });
+    }
+
+    if (!allowSubmitted && attempt.status === 'submitted') {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'ATTEMPT_SUBMITTED',
+        message: 'این آزمون قبلاً ثبت نهایی شده و ویرایش آن مسدود است.',
+      });
+    }
+
+    return attempt;
   }
 
   /**

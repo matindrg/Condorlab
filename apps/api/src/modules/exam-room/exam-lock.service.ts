@@ -1,4 +1,10 @@
-import { Injectable, ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { RedisService } from '../../common/redis/redis.service';
 import { registerExamLockCommands } from './scripts';
 
@@ -16,26 +22,54 @@ export interface StoredAnswer {
   answeredAt?: number;
 }
 
-export const LOCK_TTL_SECONDS = 180; // ۳ دقیقه — پوشش‌دهنده ۲ دقیقه قطعی اینترنت
+export interface LockState {
+  locked: boolean;
+  isOwner: boolean;
+  version: number;
+  lockedAt?: string;
+  expiresAt?: string;
+  takeoverCount: number;
+  remainingTakeovers: number;
+  canTakeover: boolean;
+  serverTime: string;
+}
+
+export interface TelemetryEvent {
+  eventType: 'TAB_BLUR' | 'TAB_HIDDEN' | 'WINDOW_BLUR' | 'FULLSCREEN_EXIT' | 'CONTEXT_MENU' | 'COPY_ATTEMPT';
+  startedAt: number;
+  durationMs?: number;
+  details?: Record<string, unknown>;
+}
+
+export const LOCK_TTL_SECONDS = 180; // ۳ دقیقه — پوشش‌دهنده ۲ دقیقه قطعی اینترنت طبق PRD
 export const TAKEOVER_LIMIT = 2; // سقف ۲ بار جابه‌جایی دستگاه (Anti-Bounce)
 export const ANSWERS_TTL_SECONDS = 86400; // ۲۴ ساعت
+export const TAKEOVER_COUNT_TTL_SECONDS = 86400; // ۲۴ ساعت
 export const HEARTBEAT_INTERVAL_MS = 30000; // ۳۰ ثانیه
+
+export const MAX_ANSWERS_PER_SYNC = 200;
+export const MAX_ANSWER_BYTES = 16 * 1024; // 16 KB
+export const MAX_SYNC_BYTES = 256 * 1024; // 256 KB
 
 @Injectable()
 export class ExamLockService {
   // فال‌بک حافظه‌ای برای زمان توسعه محلی یا آفلاین بودن موقت ردیس
-  private static inMemoryLocks = new Map<string, {
-    deviceId: string;
-    sessionId: string;
-    userId: string;
-    version: number;
-    lastHeartbeatAt: number;
-    expiresAt: number;
-  }>();
+  private static inMemoryLocks = new Map<
+    string,
+    {
+      deviceId: string;
+      sessionId: string;
+      userId: string;
+      version: number;
+      lastHeartbeatAt: number;
+      expiresAt: number;
+    }
+  >();
 
   private static inMemoryTakeovers = new Map<string, number>();
   private static inMemoryAnswers = new Map<string, Map<number, StoredAnswer>>();
   private static inMemoryLastSeq = new Map<string, number>();
+  private static inMemoryTelemetry = new Map<string, TelemetryEvent[]>();
 
   constructor(private readonly redis: RedisService) {}
 
@@ -59,6 +93,10 @@ export class ExamLockService {
     return `exam_answer_meta:{${attemptId}}`;
   }
 
+  private telemetryKey(attemptId: string): string {
+    return `exam_telemetry:{${attemptId}}`;
+  }
+
   /**
    * دریافت یا تثبیت قفل اولیه ورود به آزمون
    */
@@ -74,9 +112,9 @@ export class ExamLockService {
     const expiresAt = new Date(now + LOCK_TTL_SECONDS * 1000).toISOString();
 
     if (client && client.status === 'ready') {
-      registerExamLockCommands(client);
+      const scripts = registerExamLockCommands(client);
       try {
-        const [code, version, lastHeartbeatAt] = (await (client as any).examAcquire(
+        const [code, version, lastHeartbeatAt] = await scripts.examAcquire(
           this.lockKey(ctx.attemptId),
           this.heartbeatKey(ctx.attemptId),
           this.takeoverCountKey(ctx.attemptId),
@@ -86,7 +124,7 @@ export class ExamLockService {
           String(now),
           LOCK_TTL_SECONDS,
           TAKEOVER_LIMIT,
-        )) as [number, number, string?];
+        );
 
         if (code === 1 || code === 2) {
           return {
@@ -190,7 +228,7 @@ export class ExamLockService {
   }
 
   /**
-   * هارت‌بیت دوره‌ای (۳۰ ثانیه‌ای) و ثبت دسته‌ای پاسخ‌های ارسال‌شده
+   * هارت‌بیت دوره‌ای (۳۰ ثانیه‌ای) و همگام‌سازی دسته‌ای پاسخ‌ها
    */
   async heartbeat(
     ctx: LockContext,
@@ -205,20 +243,45 @@ export class ExamLockService {
     serverTime: string;
     heartbeatIntervalMs: number;
   }> {
+    // اعتبارسنجی حجم و اندازه پاسخ‌ها
+    if (answers && answers.length > MAX_ANSWERS_PER_SYNC) {
+      throw new BadRequestException('تعداد پاسخ‌های ارسالی در یک بسته بیش از حد مجاز است.');
+    }
+    if (answers && answers.length > 0 && clientSeq <= 0) {
+      throw new BadRequestException('ارسال clientSeq برای همگام‌سازی پاسخ‌ها الزامی است.');
+    }
+
     const client = this.redis.getClient();
     const now = Date.now();
     const expiresAt = new Date(now + LOCK_TTL_SECONDS * 1000).toISOString();
 
-    // تبدیل پاسخ‌ها به آرایه جفت‌های کلید/مقدار برای اسکریپت ردیس
     const pairs: string[] = [];
-    answers.forEach((ans) => {
-      pairs.push(String(ans.questionNumber), JSON.stringify(ans));
-    });
+    let totalPayloadBytes = 0;
+    if (answers) {
+      for (const ans of answers) {
+        let serialized: string;
+        try {
+          serialized = JSON.stringify(ans);
+        } catch {
+          throw new BadRequestException('پاسخ ارسالی قالب معتبری ندارد.');
+        }
+        const bytes = Buffer.byteLength(serialized, 'utf8');
+        if (bytes > MAX_ANSWER_BYTES) {
+          throw new BadRequestException('اندازه یک پاسخ بیش از حد مجاز است.');
+        }
+        totalPayloadBytes += bytes;
+        pairs.push(String(ans.questionNumber), serialized);
+      }
+    }
+
+    if (totalPayloadBytes > MAX_SYNC_BYTES) {
+      throw new BadRequestException('حجم کل پاسخ‌های ارسالی در این بسته بیش از حد مجاز است.');
+    }
 
     if (client && client.status === 'ready') {
-      registerExamLockCommands(client);
+      const scripts = registerExamLockCommands(client);
       try {
-        const [code, version, lastSeq] = (await (client as any).examHeartbeat(
+        const [code, version, lastSeq] = await scripts.examHeartbeat(
           this.lockKey(ctx.attemptId),
           this.heartbeatKey(ctx.attemptId),
           this.answersKey(ctx.attemptId),
@@ -231,7 +294,7 @@ export class ExamLockService {
           clientSeq,
           ANSWERS_TTL_SECONDS,
           ...pairs,
-        )) as [number, number, number];
+        );
 
         const rawCount = await client.get(this.takeoverCountKey(ctx.attemptId));
         const count = Number(rawCount || 0);
@@ -250,7 +313,6 @@ export class ExamLockService {
         }
 
         if (code === 0) {
-          // قفل به دستگاه دیگری واگذار شده است
           throw new ForbiddenException({
             statusCode: 403,
             code: 'EXAM_LOCK_LOST',
@@ -274,7 +336,7 @@ export class ExamLockService {
           });
         }
       } catch (err) {
-        if (err instanceof ForbiddenException) throw err;
+        if (err instanceof ForbiddenException || err instanceof BadRequestException) throw err;
       }
     }
 
@@ -304,21 +366,27 @@ export class ExamLockService {
     lock.lastHeartbeatAt = now;
     lock.expiresAt = now + LOCK_TTL_SECONDS * 1000;
 
-    // ذخیره پاسخ‌ها در حافظه موقت
-    let ansMap = ExamLockService.inMemoryAnswers.get(ctx.attemptId);
-    if (!ansMap) {
-      ansMap = new Map();
-      ExamLockService.inMemoryAnswers.set(ctx.attemptId, ansMap);
+    // ثبت پاسخ‌ها در حافظه موقت با رعایت Idempotency توالی
+    const prevSeq = ExamLockService.inMemoryLastSeq.get(ctx.attemptId) || 0;
+    let ackedSeq = prevSeq;
+
+    if (clientSeq > prevSeq && answers && answers.length > 0) {
+      let ansMap = ExamLockService.inMemoryAnswers.get(ctx.attemptId);
+      if (!ansMap) {
+        ansMap = new Map();
+        ExamLockService.inMemoryAnswers.set(ctx.attemptId, ansMap);
+      }
+      answers.forEach((ans) => {
+        ansMap!.set(ans.questionNumber, ans);
+      });
+      ExamLockService.inMemoryLastSeq.set(ctx.attemptId, clientSeq);
+      ackedSeq = clientSeq;
     }
-    answers.forEach((ans) => {
-      ansMap!.set(ans.questionNumber, ans);
-    });
-    ExamLockService.inMemoryLastSeq.set(ctx.attemptId, clientSeq);
 
     return {
       status: 'ok',
       version: lock.version,
-      ackedSeq: clientSeq,
+      ackedSeq,
       remainingTakeovers,
       expiresAt: new Date(lock.expiresAt).toISOString(),
       serverTime: new Date(now).toISOString(),
@@ -342,9 +410,9 @@ export class ExamLockService {
     const expiresAt = new Date(now + LOCK_TTL_SECONDS * 1000).toISOString();
 
     if (client && client.status === 'ready') {
-      registerExamLockCommands(client);
+      const scripts = registerExamLockCommands(client);
       try {
-        const [code, version, count, previousDeviceId] = (await (client as any).examTakeover(
+        const [code, version, count, previousDeviceId] = await scripts.examTakeover(
           this.lockKey(ctx.attemptId),
           this.heartbeatKey(ctx.attemptId),
           this.takeoverCountKey(ctx.attemptId),
@@ -354,8 +422,8 @@ export class ExamLockService {
           String(now),
           LOCK_TTL_SECONDS,
           TAKEOVER_LIMIT,
-          ANSWERS_TTL_SECONDS,
-        )) as [number, number, number, string?, number?];
+          TAKEOVER_COUNT_TTL_SECONDS,
+        );
 
         if (code === 1 || code === 2 || code === 3) {
           const tCount = Number(count || 0);
@@ -387,26 +455,61 @@ export class ExamLockService {
     }
 
     // فال‌بک در حافظه
-    let count = ExamLockService.inMemoryTakeovers.get(ctx.attemptId) || 0;
-    const lock = ExamLockService.inMemoryLocks.get(ctx.attemptId);
+    const existing = ExamLockService.inMemoryLocks.get(ctx.attemptId);
+    const currentTakeovers = ExamLockService.inMemoryTakeovers.get(ctx.attemptId) || 0;
 
-    if (lock && lock.userId !== ctx.userId) {
+    if (existing && existing.userId !== ctx.userId) {
       throw new UnauthorizedException('شما مجاز به تصاحب آزمون کاربر دیگری نیستید.');
     }
 
-    if (count >= TAKEOVER_LIMIT) {
+    // ۱. اگر قفل منقضی شده یا وجود ندارد: دریافت اولیه است و سهمیه مصرف نمی‌شود
+    if (!existing || existing.expiresAt <= now) {
+      ExamLockService.inMemoryLocks.set(ctx.attemptId, {
+        deviceId: ctx.deviceId,
+        sessionId: ctx.sessionId,
+        userId: ctx.userId,
+        version: 1,
+        lastHeartbeatAt: now,
+        expiresAt: now + LOCK_TTL_SECONDS * 1000,
+      });
+      return {
+        status: 'acquired',
+        version: 1,
+        takeoverCount: currentTakeovers,
+        remainingTakeovers: Math.max(0, TAKEOVER_LIMIT - currentTakeovers),
+        expiresAt,
+      };
+    }
+
+    // ۲. اگر همان دستگاه و نشست است: بدون تغییر و بدون کسر سهمیه
+    if (existing.deviceId === ctx.deviceId && existing.sessionId === ctx.sessionId) {
+      existing.lastHeartbeatAt = now;
+      existing.expiresAt = now + LOCK_TTL_SECONDS * 1000;
+      return {
+        status: 'already_owner',
+        version: existing.version,
+        takeoverCount: currentTakeovers,
+        remainingTakeovers: Math.max(0, TAKEOVER_LIMIT - currentTakeovers),
+        previousDeviceId: existing.deviceId,
+        expiresAt,
+      };
+    }
+
+    // ۳. جابه‌جایی دستگاه واقعی: بررسی سقف
+    if (currentTakeovers >= TAKEOVER_LIMIT) {
       throw new ForbiddenException({
         statusCode: 403,
         code: 'TAKEOVER_LIMIT_REACHED',
         message: 'سقف مجاز ۲ بار جابه‌جایی دستگاه تکمیل شده است.',
-        details: { remainingTakeovers: 0 },
+        details: { remainingTakeovers: 0, takeoverCount: currentTakeovers },
       });
     }
 
-    count += 1;
-    ExamLockService.inMemoryTakeovers.set(ctx.attemptId, count);
+    const newCount = currentTakeovers + 1;
+    ExamLockService.inMemoryTakeovers.set(ctx.attemptId, newCount);
+    const newVersion = existing.version + 1;
+    const prevDevice = existing.deviceId;
 
-    const newVersion = (lock?.version || 0) + 1;
     ExamLockService.inMemoryLocks.set(ctx.attemptId, {
       deviceId: ctx.deviceId,
       sessionId: ctx.sessionId,
@@ -419,29 +522,106 @@ export class ExamLockService {
     return {
       status: 'taken_over',
       version: newVersion,
-      takeoverCount: count,
-      remainingTakeovers: Math.max(0, TAKEOVER_LIMIT - count),
-      previousDeviceId: lock?.deviceId,
+      takeoverCount: newCount,
+      remainingTakeovers: Math.max(0, TAKEOVER_LIMIT - newCount),
+      previousDeviceId: prevDevice,
       expiresAt,
+    };
+  }
+
+  /**
+   * دریافت وضعیت زنده قفل بدون تغییر (Read-Only State)
+   */
+  async getState(ctx: LockContext): Promise<LockState> {
+    const client = this.redis.getClient();
+    const now = Date.now();
+
+    if (client && client.status === 'ready') {
+      try {
+        const [lockData, ttl, countRaw] = await Promise.all([
+          client.hgetall(this.lockKey(ctx.attemptId)),
+          client.ttl(this.lockKey(ctx.attemptId)),
+          client.get(this.takeoverCountKey(ctx.attemptId)),
+        ]);
+
+        const count = Number(countRaw || 0);
+        const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - count);
+
+        if (!lockData || !lockData.deviceId) {
+          return {
+            locked: false,
+            isOwner: false,
+            version: 0,
+            takeoverCount: count,
+            remainingTakeovers,
+            canTakeover: remainingTakeovers > 0,
+            serverTime: new Date(now).toISOString(),
+          };
+        }
+
+        const isOwner = lockData.deviceId === ctx.deviceId && lockData.sessionId === ctx.sessionId;
+        return {
+          locked: true,
+          isOwner,
+          version: Number(lockData.version || 1),
+          lockedAt: lockData.lastHeartbeatAt ? new Date(Number(lockData.lastHeartbeatAt)).toISOString() : undefined,
+          expiresAt: ttl > 0 ? new Date(now + ttl * 1000).toISOString() : undefined,
+          takeoverCount: count,
+          remainingTakeovers,
+          canTakeover: remainingTakeovers > 0,
+          serverTime: new Date(now).toISOString(),
+        };
+      } catch {
+        // فال‌بک به حافظه
+      }
+    }
+
+    const lock = ExamLockService.inMemoryLocks.get(ctx.attemptId);
+    const count = ExamLockService.inMemoryTakeovers.get(ctx.attemptId) || 0;
+    const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - count);
+
+    if (!lock || lock.expiresAt <= now) {
+      return {
+        locked: false,
+        isOwner: false,
+        version: 0,
+        takeoverCount: count,
+        remainingTakeovers,
+        canTakeover: remainingTakeovers > 0,
+        serverTime: new Date(now).toISOString(),
+      };
+    }
+
+    const isOwner = lock.deviceId === ctx.deviceId && lock.sessionId === ctx.sessionId;
+    return {
+      locked: true,
+      isOwner,
+      version: lock.version,
+      lockedAt: new Date(lock.lastHeartbeatAt).toISOString(),
+      expiresAt: new Date(lock.expiresAt).toISOString(),
+      takeoverCount: count,
+      remainingTakeovers,
+      canTakeover: remainingTakeovers > 0,
+      serverTime: new Date(now).toISOString(),
     };
   }
 
   /**
    * بررسی مالکیت فعال قبل از اقدامات حساس مانند ثبت نهایی
    */
-  async assertOwner(ctx: LockContext): Promise<void> {
+  async assertOwner(ctx: LockContext): Promise<number> {
     const client = this.redis.getClient();
     if (client && client.status === 'ready') {
-      registerExamLockCommands(client);
+      const scripts = registerExamLockCommands(client);
       try {
-        const [code] = (await (client as any).examAssertOwner(
+        const [code, version] = await scripts.examAssertOwner(
           this.lockKey(ctx.attemptId),
           ctx.deviceId,
           ctx.sessionId,
           ctx.userId,
-        )) as [number, number];
+        );
 
-        if (code === 1) return;
+        if (code === 1) return Number(version || 1);
         if (code === 0) {
           throw new ForbiddenException({
             statusCode: 403,
@@ -469,26 +649,30 @@ export class ExamLockService {
         message: 'شما مالک فعال این نشست نیستید.',
       });
     }
+
+    return lock.version;
   }
 
   /**
-   * آزادسازی قفل پس از ارسال قطعی آزمون
+   * آزادسازی قفل پس از ارسال قطعی آزمون یا توسط پشتیبان
    */
-  async release(ctx: LockContext): Promise<void> {
+  async release(ctxOrAttemptId: LockContext | string): Promise<void> {
+    const attemptId = typeof ctxOrAttemptId === 'string' ? ctxOrAttemptId : ctxOrAttemptId.attemptId;
     const client = this.redis.getClient();
+
     if (client && client.status === 'ready') {
       try {
-        await client.del(this.lockKey(ctx.attemptId));
-        await client.del(this.heartbeatKey(ctx.attemptId));
+        await client.del(this.lockKey(attemptId));
+        await client.del(this.heartbeatKey(attemptId));
       } catch {
         // ignore
       }
     }
-    ExamLockService.inMemoryLocks.delete(ctx.attemptId);
+    ExamLockService.inMemoryLocks.delete(attemptId);
   }
 
   /**
-   * دریافت پاسخ‌های موقت ذخیره‌شده در ردیس برای لود مجدد
+   * دریافت پاسخ‌های موقت ذخیره‌شده در ردیس برای بازیابی سریع
    */
   async getStoredAnswers(attemptId: string): Promise<Record<number, StoredAnswer>> {
     const client = this.redis.getClient();
@@ -520,5 +704,69 @@ export class ExamLockService {
     }
 
     return result;
+  }
+
+  /**
+   * محاسبه سهمیه باقیمانده جابه‌جایی
+   */
+  async remainingTakeovers(attemptId: string): Promise<number> {
+    const client = this.redis.getClient();
+    if (client && client.status === 'ready') {
+      try {
+        const rawCount = await client.get(this.takeoverCountKey(attemptId));
+        return Math.max(0, TAKEOVER_LIMIT - Number(rawCount || 0));
+      } catch {
+        // ignore
+      }
+    }
+
+    const count = ExamLockService.inMemoryTakeovers.get(attemptId) || 0;
+    return Math.max(0, TAKEOVER_LIMIT - count);
+  }
+
+  /**
+   * ثبت نامحسوس رخداد تله‌متری فرانت‌اند (ضد تقلب)
+   */
+  async recordTelemetry(attemptId: string, event: TelemetryEvent): Promise<void> {
+    const client = this.redis.getClient();
+    if (client && client.status === 'ready') {
+      try {
+        await client.rpush(this.telemetryKey(attemptId), JSON.stringify(event));
+        await client.expire(this.telemetryKey(attemptId), ANSWERS_TTL_SECONDS);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+
+    let list = ExamLockService.inMemoryTelemetry.get(attemptId);
+    if (!list) {
+      list = [];
+      ExamLockService.inMemoryTelemetry.set(attemptId, list);
+    }
+    list.push(event);
+  }
+
+  /**
+   * دریافت لاگ‌های تله‌متری برای مانیتورینگ داوری
+   */
+  async getTelemetryEvents(attemptId: string): Promise<TelemetryEvent[]> {
+    const client = this.redis.getClient();
+    if (client && client.status === 'ready') {
+      try {
+        const rawList = await client.lrange(this.telemetryKey(attemptId), 0, -1);
+        return rawList.map((str) => {
+          try {
+            return JSON.parse(str);
+          } catch {
+            return null;
+          }
+        }).filter(Boolean);
+      } catch {
+        // ignore
+      }
+    }
+
+    return ExamLockService.inMemoryTelemetry.get(attemptId) || [];
   }
 }

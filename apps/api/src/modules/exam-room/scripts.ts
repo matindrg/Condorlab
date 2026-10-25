@@ -151,7 +151,56 @@ end
 return {1, tonumber(lock[4]) or 1}
 `;
 
-export function registerExamLockCommands(redis: Redis) {
+export interface ExamLockScripts {
+  examAcquire(
+    lockKey: string,
+    heartbeatKey: string,
+    takeoverCountKey: string,
+    deviceId: string,
+    sessionId: string,
+    userId: string,
+    nowMs: string,
+    ttlSeconds: number,
+    takeoverLimit: number,
+  ): Promise<[number, number, string?]>;
+
+  examHeartbeat(
+    lockKey: string,
+    heartbeatKey: string,
+    answersKey: string,
+    answerMetaKey: string,
+    deviceId: string,
+    sessionId: string,
+    userId: string,
+    nowMs: string,
+    lockTtl: number,
+    clientSeq: number,
+    answersTtl: number,
+    ...pairs: string[]
+  ): Promise<[number, number, number]>;
+
+  examTakeover(
+    lockKey: string,
+    heartbeatKey: string,
+    countKey: string,
+    deviceId: string,
+    sessionId: string,
+    userId: string,
+    nowMs: string,
+    lockTtl: number,
+    limit: number,
+    countTtl: number,
+  ): Promise<[number, number, number, string?, number?]>;
+
+  examAssertOwner(
+    lockKey: string,
+    deviceId: string,
+    sessionId: string,
+    userId: string,
+  ): Promise<[number, number]>;
+}
+
+export function registerExamLockCommands(redis: Redis): ExamLockScripts {
   if (!('examAcquire' in redis)) {
     redis.defineCommand('examAcquire', { numberOfKeys: 3, lua: ACQUIRE_LUA });
   }
@@ -164,4 +213,6 @@ export function registerExamLockCommands(redis: Redis) {
   if (!('examAssertOwner' in redis)) {
     redis.defineCommand('examAssertOwner', { numberOfKeys: 1, lua: ASSERT_OWNER_LUA });
   }
+
+  return redis as unknown as ExamLockScripts;
 }

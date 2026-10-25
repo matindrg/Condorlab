@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ExamRoomService } from './exam-room.service';
+import { TelemetryEvent } from './exam-lock.service';
 
 interface HeartbeatBody {
   clientSeq?: number;
@@ -47,6 +48,16 @@ export class ExamRoomController {
   ) {
     const deviceId = headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
     return this.examRoomService.initRoom(identifier, user.id, user.sessionId, deviceId);
+  }
+
+  @Get(':attemptId/lock')
+  async getLockState(
+    @Param('attemptId') attemptId: string,
+    @CurrentUser() user: any,
+    @Headers('x-device-id') headerDeviceId?: string,
+  ) {
+    const deviceId = headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
+    return this.examRoomService.getLockState(attemptId, user.id, user.sessionId, deviceId);
   }
 
   @Post(':attemptId/start')
@@ -90,6 +101,16 @@ export class ExamRoomController {
   ) {
     const deviceId = bodyDeviceId || headerDeviceId || `dev_${user.sessionId.slice(0, 8)}`;
     return this.examRoomService.takeover(attemptId, user.id, user.sessionId, deviceId);
+  }
+
+  @Post(':attemptId/telemetry')
+  @HttpCode(HttpStatus.OK)
+  async recordTelemetry(
+    @Param('attemptId') attemptId: string,
+    @CurrentUser() user: any,
+    @Body() body: TelemetryEvent,
+  ) {
+    return this.examRoomService.recordTelemetry(attemptId, user.id, body);
   }
 
   @Post(':attemptId/submit')
