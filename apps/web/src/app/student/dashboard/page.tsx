@@ -695,19 +695,28 @@ export default function StudentDashboardPage() {
                   </div>
 
                   {/* دکمه‌های اکشن */}
-                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-white/5 pr-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/5 pr-3">
                     <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-gray-500" />
                       صندلی فعال و رزرو شده
                     </span>
 
-                    <Link
-                      href={`/exams/${item.slug}`}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-[#FFCC00] text-white hover:text-black font-bold text-xs transition-colors border border-white/10 hover:border-[#FFCC00]"
-                    >
-                      <span>ورود به آزمون و جزئیات</span>
-                      <ArrowLeft className="w-3.5 h-3.5" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/exams/${item.slug}`}
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium text-xs transition-colors border border-white/10"
+                      >
+                        جزئیات
+                      </Link>
+
+                      <Link
+                        href={`/exam/${item.slug}/room`}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#E6B800] text-black font-bold text-xs transition-colors shadow-md shadow-[#FFCC00]/15"
+                      >
+                        <span>ورود به اتاق آزمون</span>
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}

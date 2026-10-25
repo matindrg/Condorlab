@@ -247,10 +247,11 @@ export default function ExamDetailPage() {
 
                 <Button
                   variant="primary"
-                  onClick={() => router.push('/student/dashboard')}
-                  className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/15"
+                  onClick={() => router.push(`/exam/${exam.slug}/room`)}
+                  className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/15 flex items-center justify-center gap-2"
                 >
-                  ورود به داشبورد و جزئیات شرکت
+                  <ArrowRight className="w-4 h-4" />
+                  ورود به اتاق آزمون (شروع پاسخ‌گویی)
                 </Button>
               </div>
             ) : (
