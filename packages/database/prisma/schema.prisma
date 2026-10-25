@@ -1,0 +1,256 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  Student
+  ExamOfficer
+  ContentAdmin
+  Finance
+  Support
+  MasterAdmin
+  Grandmaster
+}
+
+enum UserStatus {
+  Pending_Verification
+  Active
+  Restricted
+  Suspended
+  Deletion_Pending
+}
+
+enum AuthProvider {
+  EMAIL_PASSWORD
+  GOOGLE
+  PHONE_OTP
+  TELEGRAM
+}
+
+enum AccessType {
+  Official
+  Open
+}
+
+enum ExamStatus {
+  Draft
+  Published
+  Active
+  Closed
+  Archived
+}
+
+model User {
+  id        String     @id @default(uuid()) @db.Uuid
+  role      UserRole   @default(Student)
+  status    UserStatus @default(Pending_Verification)
+  isOwner   Boolean    @default(false)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at")
+  deletedAt DateTime?  @map("deleted_at")
+
+  identities     Identity[]
+  profile        Profile?
+  orders         Order[]
+  ledgerEntries  LedgerEntry[]
+  attempts       Attempt[]
+  supportTickets SupportTicket[]
+
+  @@map("users")
+}
+
+model Identity {
+  id           String       @id @default(uuid()) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  provider     AuthProvider
+  identifier   String       @db.VarChar(255)
+  passwordHash String?      @map("password_hash") @db.VarChar(255)
+  isVerified   Boolean      @default(false) @map("is_verified")
+  verifiedAt   DateTime?    @map("verified_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, identifier])
+  @@map("identities")
+}
+
+model Profile {
+  userId           String    @id @map("user_id") @db.Uuid
+  firstName        String    @map("first_name") @db.VarChar(64)
+  lastName         String    @map("last_name") @db.VarChar(64)
+  phoneNumber      String?   @map("phone_number") @db.VarChar(16)
+  grade            String    @db.VarChar(8) // '7', '8', '9', '10', '11'
+  city             String    @db.VarChar(64)
+  school           String    @db.VarChar(128)
+  telegramChatId   BigInt?   @unique @map("telegram_chat_id")
+  telegramUsername String?   @map("telegram_username") @db.VarChar(64)
+  bio              String?   @db.Text
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(128)
+  type        String   @db.VarChar(32) // Exam, Book, Course
+  price       Int      @default(0) // In Tomans (0 = Free)
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("products")
+}
+
+model Coupon {
+  id              String    @id @default(uuid()) @db.Uuid
+  code            String    @unique @db.VarChar(32)
+  discountPercent Int       @map("discount_percent")
+  maxUses         Int       @map("max_uses") // سقف استفاده برای کوپن شکاری
+  usedCount       Int       @default(0) @map("used_count")
+  isHunterCoupon  Boolean   @default(false) @map("is_hunter_coupon")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  orders Order[]
+
+  @@map("coupons")
+}
+
+model Order {
+  id            String   @id @default(uuid()) @db.Uuid
+  orderNumber   String   @unique @map("order_number") @db.VarChar(32)
+  userId        String   @map("user_id") @db.Uuid
+  couponId      String?  @map("coupon_id") @db.Uuid
+  totalAmount   Int      @map("total_amount")
+  discountAmount Int     @default(0) @map("discount_amount")
+  payableAmount Int      @map("payable_amount")
+  status        String   @default("pending") @db.VarChar(32) // pending, paid, cancelled
+  paymentRef    String?  @map("payment_ref") @db.VarChar(64)
+  isZeroInvoice Boolean  @default(false) @map("is_zero_invoice")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user          User     @relation(fields: [userId], references: [id])
+  coupon        Coupon?  @relation(fields: [couponId], references: [id])
+  ledgerEntries LedgerEntry[]
+
+  @@map("orders")
+}
+
+model LedgerEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  orderId     String?  @map("order_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  amount      Int
+  type        String   @db.VarChar(32) // payment, refund, adjustment
+  description String   @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user  User   @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@map("ledger_entries")
+}
+
+model Exam {
+  id                    String     @id @default(uuid()) @db.Uuid
+  slug                  String     @unique @db.VarChar(128)
+  title                 String     @db.VarChar(255)
+  status                ExamStatus @default(Draft)
+  startTime             DateTime   @map("start_time")
+  endTime               DateTime   @map("end_time")
+  durationMinutes       Int        @map("duration_minutes")
+  price                 Int        @default(0)
+  capacity              Int?       // سقف ظرفیت رسمی (R-58)
+  isCapacityVisible     Boolean    @default(false) @map("is_capacity_visible")
+  officialEnrolledCount Int        @default(0) @map("official_enrolled_count")
+  createdAt             DateTime   @default(now()) @map("created_at")
+
+  keyVersions KeyVersion[]
+  attempts    Attempt[]
+
+  @@map("exams")
+}
+
+model KeyVersion {
+  id            String    @id @default(uuid()) @db.Uuid
+  examId        String    @map("exam_id") @db.Uuid
+  versionNumber Int       @default(1) @map("version_number")
+  isCurrent     Boolean   @default(true) @map("is_current")
+  publishedAt   DateTime  @default(now()) @map("published_at")
+
+  exam          Exam           @relation(fields: [examId], references: [id], onDelete: Cascade)
+  amendments    KeyAmendment[]
+
+  @@map("key_versions")
+}
+
+model KeyAmendment {
+  id             String     @id @default(uuid()) @db.Uuid
+  keyVersionId   String     @map("key_version_id") @db.Uuid
+  questionNumber Int        @map("question_number")
+  oldOption      Int        @map("old_option")
+  newOption      Int        @map("new_option")
+  reason         String     @db.VarChar(255)
+  regradedAt     DateTime   @default(now()) @map("regraded_at")
+
+  keyVersion KeyVersion @relation(fields: [keyVersionId], references: [id], onDelete: Cascade)
+
+  @@map("key_amendments")
+}
+
+model Attempt {
+  id              String     @id @default(uuid()) @db.Uuid
+  examId          String     @map("exam_id") @db.Uuid
+  userId          String     @map("user_id") @db.Uuid
+  accessType      AccessType @default(Official) @map("access_type")
+  startedAt       DateTime   @default(now()) @map("started_at")
+  submittedAt     DateTime?  @map("submitted_at")
+  scorePercentage Float?     @map("score_percentage")
+  officialRank    Int?       @map("official_rank")
+  takeoverCount   Int        @default(0) @map("takeover_count")
+  status          String     @default("in_progress") @db.VarChar(32) // in_progress, submitted, expired
+
+  exam    Exam            @relation(fields: [examId], references: [id])
+  user    User            @relation(fields: [userId], references: [id])
+  answers AttemptAnswer[]
+
+  @@unique([examId, userId])
+  @@map("attempts")
+}
+
+model AttemptAnswer {
+  id             String    @id @default(uuid()) @db.Uuid
+  attemptId      String    @map("attempt_id") @db.Uuid
+  questionNumber Int       @map("question_number")
+  selectedOption Int?      @map("selected_option")
+  isFlagged      Boolean   @default(false) @map("is_flagged")
+  answeredAt     DateTime? @map("answered_at")
+
+  attempt Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionNumber])
+  @@map("attempt_answers")
+}
+
+model SupportTicket {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  channel   String   @default("telegram") @db.VarChar(32)
+  subject   String   @db.VarChar(255)
+  status    String   @default("open") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("support_tickets")
+}

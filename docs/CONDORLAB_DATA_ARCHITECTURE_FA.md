@@ -81,8 +81,8 @@ CREATE UNIQUE INDEX idx_users_single_owner ON users (is_owner) WHERE is_owner = 
 CREATE TABLE identities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider VARCHAR(32) NOT NULL, -- EMAIL_PASSWORD, GOOGLE, PHONE_OTP
-    identifier VARCHAR(255) NOT NULL, -- ایمیل یا شماره موبایل
+    provider VARCHAR(32) NOT NULL, -- EMAIL_PASSWORD, GOOGLE, PHONE_OTP, TELEGRAM
+    identifier VARCHAR(255) NOT NULL, -- ایمیل یا شماره موبایل یا Chat_ID تلگرام
     password_hash VARCHAR(255) NULL, -- هش رمز برای ایمیل
     is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     verified_at TIMESTAMPTZ NULL,
@@ -98,13 +98,29 @@ CREATE TABLE profiles (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     first_name VARCHAR(64) NOT NULL,
     last_name VARCHAR(64) NOT NULL,
-    phone_number VARCHAR(16) NOT NULL,
+    phone_number VARCHAR(16) NULL, -- اختیاری در فاز A
     grade VARCHAR(8) NOT NULL CHECK (grade IN ('7', '8', '9', '10', '11')), -- پایه ۱۲ مسدود است
     city VARCHAR(64) NOT NULL,
     school VARCHAR(128) NOT NULL,
+    telegram_chat_id BIGINT UNIQUE NULL, -- شناسه چت تلگرام متصل به کاربر
+    telegram_username VARCHAR(64) NULL,
     bio TEXT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+```
+
+#### جدول `support_tickets` (تیکتینگ و پشتیبانی چندکاناله)
+```sql
+CREATE TABLE support_tickets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel VARCHAR(32) NOT NULL DEFAULT 'telegram', -- telegram, web
+    subject VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'open', -- open, pending, closed
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_support_tickets_user_id ON support_tickets(user_id);
 ```
 
 ---

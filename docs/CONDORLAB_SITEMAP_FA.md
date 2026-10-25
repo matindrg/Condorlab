@@ -51,6 +51,8 @@
 │   └── /exams/[slug]
 ├── /leaderboard/[examSlug]
 ├── /about
+├── /resources                  (کتابخانه کتب رفرنس المپیاد و جزوات طلایی اساتید)
+├── /resources/[slug]           (صفحه دانلود مستقیم منبع با ورود به حساب کاربری)
 ├── /contact
 ├── /faq
 ├── /terms
@@ -62,6 +64,7 @@
     ├── /verify-email
     ├── /forgot-password
     ├── /reset-password
+    ├── /auth/telegram             (تأیید اتصال هوشمند حساب سایت به بات تلگرام)
     └── /login/phone               (فاز B — شماره + کد یک‌بارمصرف؛ رزرو)
 
 خرید

@@ -1,22 +1,28 @@
 {
-  "name": "condorlab",
+  "name": "condorlab-monorepo",
   "version": "1.0.0",
-  "description": "> **مخزن اسناد جامع محصول، معماری فنی، مشخصات امنیتی و نمونه‌ی فنی قفل آزمون**   > پلتفرم تخصصی سنجش تحلیلی، آزمون‌های جلد‌به‌جلد کمپبل و آموزش نخبگانی المپیاد زیست‌شناسی ایران.",
-  "main": "index.js",
-  "scripts": {},
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/matindrg/Condorlab.git"
+  "private": true,
+  "description": "کندرلب — پلتفرم سنجش تحلیلی المپیاد زیست‌شناسی ایران",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces",
+    "dev:web": "npm run dev --workspace=@condorlab/web",
+    "dev:api": "npm run dev --workspace=@condorlab/api",
+    "build": "npm run build --workspaces",
+    "build:web": "npm run build --workspace=@condorlab/web",
+    "build:api": "npm run build --workspace=@condorlab/api",
+    "db:generate": "npm run db:generate --workspace=@condorlab/database",
+    "db:migrate": "npm run db:migrate --workspace=@condorlab/database",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "test": "playwright test"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/matindrg/Condorlab/issues"
-  },
-  "homepage": "https://github.com/matindrg/Condorlab#readme",
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "@types/node": "^26.6.5"
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
   }
 }

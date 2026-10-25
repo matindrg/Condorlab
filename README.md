@@ -3,9 +3,9 @@
 > **مخزن اسناد جامع محصول، معماری فنی، مشخصات امنیتی و نمونه‌ی فنی قفل آزمون**  
 > پلتفرم تخصصی سنجش تحلیلی، آزمون‌های جلد‌به‌جلد کمپبل و آموزش نخبگانی المپیاد زیست‌شناسی ایران.
 
-[![status](https://img.shields.io/badge/status-pre--development-yellow)](CONDORLAB_ROADMAP_FA.md)
-[![phase](https://img.shields.io/badge/phase-A%20%7C%20MVP%202.3-blue)](CONDORLAB_MVP_FA.md)
-[![docs](https://img.shields.io/badge/docs-PRD%203.3-informational)](CONDORLAB_PRD_FA-V3.md)
+[![status](https://img.shields.io/badge/status-pre--development-yellow)](docs/CONDORLAB_ROADMAP_FA.md)
+[![phase](https://img.shields.io/badge/phase-A%20%7C%20MVP%202.3-blue)](docs/CONDORLAB_MVP_FA.md)
+[![docs](https://img.shields.io/badge/docs-PRD%203.3-informational)](docs/CONDORLAB_PRD_FA-V3.md)
 
 ---
 
@@ -19,42 +19,48 @@
 
 ---
 
-## ساختار و نقشه اسناد مخزن
+## ساختار مخزن (Monorepo) و اسناد
 
 ```
 Condorlab/
-├── اسناد راهبردی و محصولی
-│   ├── CONDORLAB_PRODUCT_BRIEF_FA.md   # 🎯 بریف محصول (۳٫۰) — تمایز، پیام بازگشت، پرسونا و جایگاه
-│   ├── CONDORLAB_PRD_FA-V3.md          # 📘 سند نیازمندی‌های محصول (۳٫۳) — مرجع واحد همه‌ی قواعد
-│   ├── CONDORLAB_MVP_FA.md             # 📋 سند اجرایی فاز A (۲٫۳) — دو پایلوت، اپیک‌ها و فال‌بک‌ها
-│   └── CONDORLAB_CONTENT_PLAN_1405_FA.md # 📚 برنامه تولید محتوای سال ۱۴۰۵–۱۴۰۶ اساتید (متین، نیما، محسن)
+├── apps/
+│   ├── web/                            # 🌐 برنامه فرانت‌اند (Next.js 15 App Router + React 19)
+│   └── api/                            # ⚙️ وب‌سرویس بک‌اند و بات تلگرام (NestJS + Telegraf)
 │
-├── اسناد تجربه کاربری و جریان‌ها
-│   ├── CONDORLAB_USER_FLOW_FA.md       # 🔀 جریان‌های کاربر (۱٫۳) — مسیرها، ظرفیت، کوپن و خطاها
+├── packages/
+│   ├── database/                       # 🗄️ لایه داده و پایگاه‌داده (Prisma ORM + PostgreSQL)
+│   ├── shared/                         # 📦 پکیج تایپ‌ها، DTOها، و دیکشنری متون R-63
+│   └── config/                         # 🛠️ کانفیگ‌های اشتراکی TypeScript، ESLint و Tailwind
+│
+├── docs/                               # 📚 اسناد جامع معماری، محصول و مشخصات فنی
+│   ├── CONDORLAB_PRODUCT_BRIEF_FA.md   # 🎯 بریف محصول (۳٫۰)
+│   ├── CONDORLAB_PRD_FA-V3.md          # 📘 سند نیازمندی‌های محصول (۳٫۳)
+│   ├── CONDORLAB_MVP_FA.md             # 📋 سند اجرایی فاز A (۲٫۳)
+│   ├── CONDORLAB_TECH_STACK_FA.md      # ⚙️ معماری فنی و پلتفرم (۱٫۱)
+│   ├── CONDORLAB_TECH_ECOSYSTEM_FA.md  # 🛠️ اکوسیستم فریم‌ورک‌ها و ابزارها (۱٫۰)
+│   ├── CONDORLAB_TELEGRAM_BOT_SPEC_FA.md # 🤖 معماری و جریان‌های بات تلگرام (۱٫۰)
+│   ├── CONDORLAB_DATA_ARCHITECTURE_FA.md # 🗄️ مدل داده و اسکیمای دیتابیس (۱٫۰)
+│   ├── CONDORLAB_ANTI_CHEAT_FA.md      # 🛡️ سامانه ضدتقلب و سشن‌لاک (۱٫۰)
+│   ├── CONDORLAB_AUTH_SPEC_FA.md       # 🔑 معماری احراز هویت (۱٫۰)
+│   ├── CONDORLAB_WIREFRAMES_FA.md      # 🖼️ وایرفریم‌ها و چیدمان تعاملی (۱٫۰)
+│   ├── CONDORLAB_USER_FLOW_FA.md       # 🔀 جریان‌های کاربر (۱٫۳)
 │   ├── CONDORLAB_SITEMAP_FA.md         # 🗺️ سایت‌مپ و ساختار URLها (۱٫۳)
-│   ├── CONDORLAB_UX_GUIDE_FA.md        # 📱 راهنمای تجربه کاربری (۱٫۱) — اسکلت بارگذاری و موبایل‌فرست
-│   ├── CONDORLAB_WIREFRAMES_FA.md      # 🖼️ وایرفریم‌ها و ساختار چیدمان (۱٫۰) — ۶ صفحه حیاتی، موبایل‌فرست ۳۲۰px و بدون CLS
-│   └── CONDORLAB_EMAIL_TEMPLATES_FA.md # ✉️ الگوهای ایمیل‌های تراکنشی (۱٫۰) — ۵ قالب استاندارد، متغیرها و ضد فیشینگ
+│   ├── CONDORLAB_UX_GUIDE_FA.md        # 📱 راهنمای تجربه کاربری و موبایل‌فرست (۱٫۱)
+│   ├── CONDORLAB_EMAIL_TEMPLATES_FA.md # ✉️ الگوهای ایمیل‌های تراکنشی (۱٫۰)
+│   ├── CONDORLAB_GAMIFICATION_SPEC_FA.md # 🏆 موتور گیمیفیکیشن Condor Arena (۱٫۰)
+│   ├── CONDORLAB_SECURITY_FA.md        # 🔒 امنیت و انطباق OWASP (۱٫۰)
+│   ├── CONDORLAB_LAUNCH_CHECKLIST_FA.md # 🚀 چک‌لیست عملیاتی روز لانچ (۱٫۰)
+│   ├── CONDORLAB_ROADMAP_FA.md         # 🧭 نقشه راه تا دروازه سبز G1 (۱٫۲)
+│   └── CONDORLAB_CONTENT_PLAN_1405_FA.md # 📚 برنامه تولید محتوای سال ۱۴۰۵
 │
-├── اسناد معماری فنی و مهندسی (جدید)
-│   ├── CONDORLAB_TECH_STACK_FA.md      # ⚙️ سند معماری فنی و پلتفرم (۱٫۱) — Next.js + NestJS + Redis
-│   ├── CONDORLAB_AUTH_SPEC_FA.md       # 🔑 معماری احراز هویت و سشن‌ها (۱٫۰) — کوکی، سقف ۲ دستگاه و OTP
-│   ├── CONDORLAB_DATA_ARCHITECTURE_FA.md # 🗄️ مدل داده و اسکیمای دیتابیس (۱٫۰) — ERD، جداول Postgres و ردیس
-│   ├── CONDORLAB_ANTI_CHEAT_FA.md      # 🛡️ سامانه ضدتقلب و یکپارچگی (۱٫۰) — قفل فعال، Takeover و تله‌متری
-│   ├── CONDORLAB_GAMIFICATION_SPEC_FA.md # 🏆 موتور گیمیفیکیشن عملکردی (۱٫۰) — استریک، سطوح Elo و ریتینگ
-│   ├── CONDORLAB_SECURITY_FA.md        # 🔒 معماری امنیت و ASVS سطح ۲ (۱٫۰) — هدرها، Throttler و OWASP
-│   └── CONDORLAB_LAUNCH_CHECKLIST_FA.md # 🚀 چک‌لیست عملیاتی و تضمین کیفیت روز لانچ (۱٫۰)
+├── docker/                             # 🐳 فایل‌های داکر و کانتینرسازی
+│   ├── docker-compose.yml              # ارکستراسیون سرویس‌های دیتابیس، ردیس و کانتینرها
+│   ├── Dockerfile.web                  # کانتینر ایزوله فرانت‌اند
+│   └── Dockerfile.api                  # کانتینر ایزوله بک‌اند
 │
-├── برنامه‌ریزی و فرآیندها
-│   ├── CONDORLAB_ROADMAP_FA.md         # 🧭 نقشه راه پیش از کدنویسی (۱٫۲) — گیت‌های G0 تا G1
-│   ├── CONTRIBUTING.md                  # 🤝 راهنمای مشارکت و کدنویسی
-│   └── SECURITY.md                     # 🛡️ خط‌مشی گزارش آسیب‌پذیری
-│
-├── دارایی‌های بصری
-│   └── logo.jpg                        # 🎨 دارایی بصری موجود (پالت #3A3A3A و #FFCC00)
-│
-└── نمونه مرجع فنی
-    └── session-lock/                   # 🔒 نمونه مرجع پیاده‌سازی‌شده قفل فعال + Takeover (Redis + Express)
+├── archive/                            # 📦 کدهای آرشیوشده و نمونه‌های مرجع
+│   └── session-lock/                   # 🔒 نمونه مرجع پیاده‌سازی‌شده قفل فعال (Redis + Express)
+└── README.md                           # راهنمای اصلی مخزن
 ```
 
 ---
@@ -63,32 +69,34 @@ Condorlab/
 
 | سند | نسخه | حوزه | مخاطب | وضعیت |
 | :--- | :---: | :--- | :--- | :---: |
-| [بریف محصول](CONDORLAB_PRODUCT_BRIEF_FA.md) | ۳٫۰ | استراتژی، پیام بازگشت، تمایز کمپبل و پرسونای پایه‌های ۹ تا ۱۱ | تیم محصول و مارکتینگ | مصوب |
-| [PRD](CONDORLAB_PRD_FA-V3.md) | ۳٫۳ | مرجع واحد کلیه قواعد سیستم، ظرفیت (R-58)، کوپن شکاری (R-59)، بانک دانش (R-60) | فنی، محصول، مدیریت | مصوب |
-| [MVP](CONDORLAB_MVP_FA.md) | ۲٫۳ | اسکوپ اجرایی فاز A، دو پایلوت متوالی، تیم ۱ نفره + AI در ۳–۴ هفته | تیم فنی و اجرایی | مصوب |
-| [برنامه محتوا](CONDORLAB_CONTENT_PLAN_1405_FA.md) | ۱۴۰۵ | بودجه، بازه انتشار، آزمون‌های کمپبل و کلاس‌های اساتید | تیم علمی و محتوا | مصوب |
-| [جریان کاربر](CONDORLAB_USER_FLOW_FA.md) | ۱٫۳ | ۲۳ سناریوی تعاملی کاربر، اتاق آزمون دوگانه و کارنامه متصل به کمپبل | طراحی و فرانت‌اند | مصوب |
-| [سایت‌مپ](CONDORLAB_SITEMAP_FA.md) | ۱٫۳ | ساختار صفحات، کنترل دسترسی، ایندکس و مسیر ایمپورت CSV | فرانت‌اند و سئو | مصوب |
-| [راهنمای UX](CONDORLAB_UX_GUIDE_FA.md) | ۱٫۱ | استانداردهای بارگذاری اسکلت (CLS ≈ ۰) و الزامات موبایل‌فرست ۳۲۰px | طراحی و فرانت‌اند | مصوب |
-| [وایرفریم‌ها](CONDORLAB_WIREFRAMES_FA.md) | ۱٫۰ | چیدمان ۶ صفحه حیاتی، اسکلت‌های تعاملی، مدال تیک‌اوور و سازگاری ۳۲۰px | فرانت‌اند و طراحی | مصوب |
-| [الگوهای ایمیل](CONDORLAB_EMAIL_TEMPLATES_FA.md) | ۱٫۰ | ۵ الگوی ایمیل تراکنشی، متغیرها، رکوردهای SPF/DKIM/DMARC و ضد فیشینگ | فرانت‌اند، بک‌اند و محصول | مصوب |
-| [استک فنی](CONDORLAB_TECH_STACK_FA.md) | ۱٫۱ | مونوپکیج TypeScript، Next.js، NestJS، Postgres و Redis | تیم توسعه | مصوب |
-| [معماری Auth](CONDORLAB_AUTH_SPEC_FA.md) | ۱٫۰ | کوکی‌های HttpOnly، سقف ۲ نشست (FIFO)، گوگل و آمادگی OTP | بک‌اند و امنیت | مصوب |
-| [معماری داده](CONDORLAB_DATA_ARCHITECTURE_FA.md) | ۱٫۰ | اسکیمای کامل جداول، ERD، دفترکل تغییرناپذیر و کلیدهای ردیس | دیتابیس و بک‌اند | مصوب |
-| [سامانه ضدتقلب](CONDORLAB_ANTI_CHEAT_FA.md) | ۱٫۰ | قفل سشن ردیس، Takeover دوگانه، ذخیره آفلاین و تله‌متری فرانت | بک‌اند و فرانت‌اند | مصوب |
-| [گیمیفیکیشن](CONDORLAB_GAMIFICATION_SPEC_FA.md) | ۱٫۰ | استریک چالش روزانه کمپبل، سطوح شش‌گانه المپیاد، ریتینگ پویا | پروداکت و گیمیفیکیشن | مصوب |
-| [امنیت سیستم](CONDORLAB_SECURITY_FA.md) | ۱٫۰ | چک‌لیست OWASP ASVS سطح ۲، هدرهای CSP/HSTS و محدودیت نرخ | امنیت و DevOps | مصوب |
-| [چک‌لیست لانچ](CONDORLAB_LAUNCH_CHECKLIST_FA.md) | ۱٫۰ | ران‌بوک عملیاتی، تست بار ۲۰۰ کاربر، T-7 فال‌بک و سناریوی روز آزمون | مدیر آزمون و DevOps | مصوب |
-| [نقشه راه](CONDORLAB_ROADMAP_FA.md) | ۱٫۲ | مراحل آماده‌سازی پیش از کدنویسی و دروازه سبز G1 | مالک و مدیریت | مصوب |
+| [بریف محصول](docs/CONDORLAB_PRODUCT_BRIEF_FA.md) | ۳٫۰ | استراتژی، پیام بازگشت، تمایز کمپبل و پرسونای پایه‌های ۹ تا ۱۱ | تیم محصول و مارکتینگ | مصوب |
+| [PRD](docs/CONDORLAB_PRD_FA-V3.md) | ۳٫۳ | مرجع واحد کلیه قواعد سیستم، ظرفیت (R-58)، کوپن شکاری (R-59)، بانک دانش (R-60) | فنی، محصول، مدیریت | مصوب |
+| [MVP](docs/CONDORLAB_MVP_FA.md) | ۲٫۳ | اسکوپ اجرایی فاز A، دو پایلوت متوالی، تیم ۱ نفره + AI در ۳–۴ هفته | تیم فنی و اجرایی | مصوب |
+| [برنامه محتوا](docs/CONDORLAB_CONTENT_PLAN_1405_FA.md) | ۱۴۰۵ | بودجه، بازه انتشار، آزمون‌های کمپبل و کلاس‌های اساتید | تیم علمی و محتوا | مصوب |
+| [جریان کاربر](docs/CONDORLAB_USER_FLOW_FA.md) | ۱٫۳ | ۲۳ سناریوی تعاملی کاربر، اتاق آزمون دوگانه و کارنامه متصل به کمپبل | طراحی و فرانت‌اند | مصوب |
+| [سایت‌مپ](docs/CONDORLAB_SITEMAP_FA.md) | ۱٫۳ | ساختار صفحات، کنترل دسترسی، ایندکس و مسیر ایمپورت CSV | فرانت‌اند و سئو | مصوب |
+| [راهنمای UX](docs/CONDORLAB_UX_GUIDE_FA.md) | ۱٫۱ | استانداردهای بارگذاری اسکلت (CLS ≈ ۰) و الزامات موبایل‌فرست ۳۲۰px | طراحی و فرانت‌اند | مصوب |
+| [وایرفریم‌ها](docs/CONDORLAB_WIREFRAMES_FA.md) | ۱٫۰ | چیدمان ۶ صفحه حیاتی، اسکلت‌های تعاملی، مدال تیک‌اوور و سازگاری ۳۲۰px | فرانت‌اند و طراحی | مصوب |
+| [الگوهای ایمیل](docs/CONDORLAB_EMAIL_TEMPLATES_FA.md) | ۱٫۰ | ۵ الگوی ایمیل تراکنشی، متغیرها، رکوردهای SPF/DKIM/DMARC و ضد فیشینگ | فرانت‌اند، بک‌اند و محصول | مصوب |
+| [استک فنی](docs/CONDORLAB_TECH_STACK_FA.md) | ۱٫۱ | مونوپکیج TypeScript، Next.js، NestJS، Postgres و Redis | تیم توسعه | مصوب |
+| [اکوسیستم و ابزارها](docs/CONDORLAB_TECH_ECOSYSTEM_FA.md) | ۱٫۰ | شناسنامه فریم‌ورک‌ها، GSAP، لایبرری‌های موشن، ORM و اسکیل‌ها | تیم توسعه و طراحی | مصوب |
+| [بات تلگرام](docs/CONDORLAB_TELEGRAM_BOT_SPEC_FA.md) | ۱٫۰ | معماری Deep Linking، سرورلس کلودفلر، پشتیبانی و توزیع منابع | تیم توسعه و پروداکت | مصوب |
+| [معماری Auth](docs/CONDORLAB_AUTH_SPEC_FA.md) | ۱٫۰ | کوکی‌های HttpOnly، سقف ۲ نشست (FIFO)، گوگل و آمادگی OTP | بک‌اند و امنیت | مصوب |
+| [معماری داده](docs/CONDORLAB_DATA_ARCHITECTURE_FA.md) | ۱٫۰ | اسکیمای کامل جداول، ERD، دفترکل تغییرناپذیر و کلیدهای ردیس | دیتابیس و بک‌اند | مصوب |
+| [سامانه ضدتقلب](docs/CONDORLAB_ANTI_CHEAT_FA.md) | ۱٫۰ | قفل سشن ردیس، Takeover دوگانه، ذخیره آفلاین و تله‌متری فرانت | بک‌اند و فرانت‌اند | مصوب |
+| [گیمیفیکیشن](docs/CONDORLAB_GAMIFICATION_SPEC_FA.md) | ۱٫۰ | استریک چالش روزانه کمپبل، سطوح شش‌گانه المپیاد، ریتینگ پویا | پروداکت و گیمیفیکیشن | مصوب |
+| [امنیت سیستم](docs/CONDORLAB_SECURITY_FA.md) | ۱٫۰ | چک‌لیست OWASP ASVS سطح ۲، هدرهای CSP/HSTS و محدودیت نرخ | امنیت و DevOps | مصوب |
+| [چک‌لیست لانچ](docs/CONDORLAB_LAUNCH_CHECKLIST_FA.md) | ۱٫۰ | ران‌بوک عملیاتی، تست بار ۲۰۰ کاربر، T-7 فال‌بک و سناریوی روز آزمون | مدیر آزمون و DevOps | مصوب |
+| [نقشه راه](docs/CONDORLAB_ROADMAP_FA.md) | ۱٫۲ | مراحل آماده‌سازی پیش از کدنویسی و دروازه سبز G1 | مالک و مدیریت | مصوب |
 
 ---
 
-## نمونه‌ی فنی مرجع: `session-lock/`
+## نمونه‌ی فنی مرجع: `archive/session-lock/`
 
-این مخزن شامل یک پیاده‌سازی واقعی و آماده با **Node.js/TypeScript + Redis 7 + React Hooks** است که در پوشه‌ی [`session-lock/`](session-lock/) قرار دارد و رفتار قفل فعال، مکانیزم Takeover و همگام‌سازی آفلاین را در عمل اثبات می‌کند.
+این مخزن شامل یک پیاده‌سازی واقعی و آماده با **Node.js/TypeScript + Redis 7 + React Hooks** است که در پوشه‌ی [`archive/session-lock/`](archive/session-lock/) قرار دارد و رفتار قفل فعال، مکانیزم Takeover و همگام‌سازی آفلاین را در عمل اثبات می‌کند.
 
 ```bash
-cd session-lock
+cd archive/session-lock
 cp .env.example .env
 docker compose up -d          # اجرای ردیس ۷ محلی
 npm install
