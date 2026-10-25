@@ -26,6 +26,9 @@ export interface ExamSummary {
   capacity?: number;
   isCapacityVisible: boolean;
   officialEnrolledCount: number;
+  isCapacityFull?: boolean;
+  remainingSeats?: number;
+  isEnrolled?: boolean;
 }
 
 export interface QuestionMetadata {
@@ -90,6 +93,7 @@ export interface CheckoutPreview {
   isHunterCoupon?: boolean;
   isProfileComplete: boolean;
   missingProfileFields: string[];
+  alreadyPurchased?: boolean;
 }
 
 export interface CouponValidationResult {

@@ -1,16 +1,19 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { messagesFa, LoginSchema } from '@condorlab/shared';
 import { AlertCircle } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/student/dashboard';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -22,7 +25,6 @@ export default function LoginPage() {
     setGeneralError(null);
     setErrors({});
 
-    // اعتبارسنجی فرانت‌اند با Zod
     const result = LoginSchema.safeParse({ email, password });
     if (!result.success) {
       const fieldErrors: Record<string, string> = {};
@@ -41,15 +43,21 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      if (!res.ok) {
-        setGeneralError(data.message || messagesFa.auth.invalidCredentials);
+      if (!res.ok || !data?.success) {
+        setGeneralError(data?.message || messagesFa.auth.invalidCredentials);
         return;
       }
 
-      // هدایت به داشبورد پس از لاگین موفق
-      router.push('/student/dashboard');
+      if (data.user) {
+        try {
+          localStorage.setItem('condor_user', JSON.stringify(data.user));
+          window.dispatchEvent(new Event('condor_auth_change'));
+        } catch {}
+      }
+
+      router.push(redirect);
     } catch {
       setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت را بررسی فرمایید.');
     } finally {
@@ -153,11 +161,26 @@ export default function LoginPage() {
         {/* فوتر فرم و لینک به ثبت‌نام */}
         <p className="mt-8 text-center text-xs text-gray-400">
           حساب کاربری ندارید؟{' '}
-          <Link href="/signup" className="text-[#FFCC00] font-bold hover:underline">
+          <Link
+            href={`/signup${redirect !== '/student/dashboard' ? `?redirect=${encodeURIComponent(redirect)}` : ''}`}
+            className="text-[#FFCC00] font-bold hover:underline"
+          >
             {messagesFa.auth.signup}
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">در حال بارگذاری...</div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

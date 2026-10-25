@@ -4,9 +4,10 @@ import { RedisModule } from './common/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ExamsModule } from './modules/exams/exams.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
-  imports: [PrismaModule, RedisModule, AuthModule, ExamsModule, CheckoutModule],
+  imports: [PrismaModule, RedisModule, AuthModule, ExamsModule, CheckoutModule, DashboardModule],
   controllers: [],
   providers: [],
 })

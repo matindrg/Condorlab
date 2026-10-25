@@ -58,39 +58,130 @@ export class ExamsService {
   ];
 
   /**
+   * دریافت شناسه‌ها و اسلاگ‌های تمام آزمون‌های خریداری‌شده توسط کاربر
+   */
+  async getUserEnrolledExamIds(userId: string | undefined): Promise<string[]> {
+    if (!userId) return [];
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
+      let dbUser: any = null;
+      if (isUuid) {
+        dbUser = await this.prisma.client.user.findUnique({ where: { id: userId } });
+      }
+      if (!dbUser) {
+        dbUser = await this.prisma.client.user.findFirst({ orderBy: { createdAt: 'desc' } });
+      }
+
+      if (dbUser) {
+        const attempts = await this.prisma.client.attempt.findMany({
+          where: { userId: dbUser.id },
+          include: { exam: true },
+        });
+
+        const ids: string[] = [];
+        attempts.forEach((att) => {
+          if (att.examId) ids.push(att.examId);
+          if (att.exam?.id) ids.push(att.exam.id);
+          if (att.exam?.slug) ids.push(att.exam.slug);
+        });
+        return Array.from(new Set(ids));
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+
+  /**
+   * بررسی آیا کاربر این آزمون را خریداری کرده یا خیر
+   */
+  async isUserEnrolled(userId: string | undefined, examId: string): Promise<boolean> {
+    if (!userId) return false;
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
+      let dbUser: any = null;
+      if (isUuid) {
+        dbUser = await this.prisma.client.user.findUnique({ where: { id: userId } });
+      }
+      if (!dbUser) {
+        dbUser = await this.prisma.client.user.findFirst({ orderBy: { createdAt: 'desc' } });
+      }
+
+      const isExamUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(examId);
+      let dbExam: any = null;
+      if (isExamUuid) {
+        dbExam = await this.prisma.client.exam.findUnique({ where: { id: examId } });
+      }
+      if (!dbExam) {
+        dbExam = await this.prisma.client.exam.findUnique({ where: { slug: examId } });
+      }
+
+      if (dbUser && dbExam) {
+        const attempt = await this.prisma.client.attempt.findUnique({
+          where: {
+            examId_userId: {
+              examId: dbExam.id,
+              userId: dbUser.id,
+            },
+          },
+        });
+        if (attempt) return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  }
+
+  /**
    * دریافت لیست آزمون‌های کاتالوگ با فیلتر جلد کمپبل و جستجو
    */
-  async findAll(volume?: number, search?: string): Promise<ExamSummary[]> {
+  async findAll(volume?: number, search?: string, userId?: string): Promise<ExamSummary[]> {
+    let resultExams: ExamSummary[] = [];
+
     try {
       const exams = await this.prisma.client.exam.findMany({
         where: {
-          status: { in: ['Published', 'Active'] },
+          status: { in: ['Published', 'Active', 'Closed'] },
         },
         orderBy: { startTime: 'asc' },
       });
 
       if (exams && exams.length > 0) {
-        return exams.map((e) => this.mapPrismaExam(e));
+        resultExams = exams.map((e) => this.mapPrismaExam(e));
       }
     } catch {
       // استفاده از داده‌های پیش‌فرض در صورت عدم دسترسی به دیتابیس
     }
 
-    let filtered = [...this.mockExams];
-    if (volume) {
-      filtered = filtered.filter((e) => e.campbellVolumes.includes(Number(volume)));
+    if (resultExams.length === 0) {
+      let filtered = [...this.mockExams];
+      if (volume) {
+        filtered = filtered.filter((e) => e.campbellVolumes.includes(Number(volume)));
+      }
+      if (search) {
+        const s = search.toLowerCase();
+        filtered = filtered.filter((e) => e.title.toLowerCase().includes(s));
+      }
+      resultExams = filtered;
     }
-    if (search) {
-      const s = search.toLowerCase();
-      filtered = filtered.filter((e) => e.title.toLowerCase().includes(s));
+
+    if (userId) {
+      resultExams = await Promise.all(
+        resultExams.map(async (exam) => {
+          const isEnrolled = await this.isUserEnrolled(userId, exam.id || exam.slug);
+          return { ...exam, isEnrolled };
+        }),
+      );
     }
-    return filtered;
+
+    return resultExams;
   }
 
   /**
    * دریافت جزئیات یک آزمون با اسلاگ یکتا و محاسبه وضعیت ظرفیت
    */
-  async findBySlug(slug: string): Promise<ExamSummary & { isCapacityFull: boolean; remainingSeats?: number }> {
+  async findBySlug(slug: string, userId?: string): Promise<ExamSummary & { isCapacityFull: boolean; remainingSeats?: number; isEnrolled?: boolean }> {
     let exam: ExamSummary | undefined;
 
     try {
@@ -112,17 +203,27 @@ export class ExamsService {
       throw new NotFoundException('آزمون مورد نظر یافت نشد.');
     }
 
-    const isCapacityFull = exam.capacity ? exam.officialEnrolledCount >= exam.capacity : false;
+    const isCapacityFull =
+      exam.status === ExamStatus.Closed ||
+      (exam.capacity ? exam.officialEnrolledCount >= exam.capacity : false);
     const remainingSeats = exam.capacity ? Math.max(0, exam.capacity - exam.officialEnrolledCount) : undefined;
+
+    const isEnrolled = userId ? await this.isUserEnrolled(userId, exam.id || exam.slug) : false;
 
     return {
       ...exam,
       isCapacityFull,
       remainingSeats: exam.isCapacityVisible ? remainingSeats : undefined,
+      isEnrolled,
     };
   }
 
   private mapPrismaExam(e: any): ExamSummary {
+    const isCapacityFull =
+      e.status === 'Closed' ||
+      (e.capacity ? e.officialEnrolledCount >= e.capacity : false);
+    const remainingSeats = e.capacity ? Math.max(0, e.capacity - e.officialEnrolledCount) : undefined;
+
     return {
       id: e.id,
       slug: e.slug,
@@ -137,6 +238,8 @@ export class ExamsService {
       capacity: e.capacity || undefined,
       isCapacityVisible: e.isCapacityVisible,
       officialEnrolledCount: e.officialEnrolledCount,
+      isCapacityFull,
+      remainingSeats: e.isCapacityVisible ? remainingSeats : undefined,
     };
   }
 }

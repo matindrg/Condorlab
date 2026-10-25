@@ -19,6 +19,9 @@ export function toEnglishDigits(str: string | number | null | undefined): string
     value = value.replace(persianRegex, i.toString()).replace(arabicRegex, i.toString());
   }
 
+  // نرمال‌سازی نماد درصد و ممیز اعشار فارسی
+  value = value.replace(/٪/g, '%').replace(/٫/g, '.');
+
   return value;
 }
 
@@ -45,4 +48,13 @@ export function formatPersianNumber(num: number | string): string {
   const parts = englishNumber.toString().split('.');
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '،');
   return toPersianDigits(parts.join('.'));
+}
+
+/**
+ * قالب‌بندی مبلغ به تومان همراه با ارقام فارسی
+ */
+export function formatToman(amount: number | string): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(num) || num === 0) return 'رایگان';
+  return `${formatPersianNumber(num)} تومان`;
 }

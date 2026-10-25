@@ -10,4 +10,136 @@
 
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: #0d0e12;
+  color: #ffffff;
+}
+
+/* رفع مشکل کاهش ارتفاع و استایل پیش‌فرض سیستم‌عامل در عناصر select (به‌ویژه Safari و macOS) */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+select option {
+  background-color: #181818;
+  color: #ffffff;
+}
+
+/* انیمیشن‌های سخت‌افزاری سبک و فوق‌سریع (بدون تاخیر مصنوعی و بدون کند کردن لود کانتنت) */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes morphIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseSubtle {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 204, 0, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 204, 0, 0);
+  }
+}
+
+/* تاخیرهای بسیار ظریف و میکرو ۳۰ میلی‌ثانیه‌ای صرفاً برای ریتم بصری سریع و بدون ایجاد معطلی */
+.animate-stagger-1 {
+  animation: fadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) 0s both;
+}
+
+.animate-stagger-2 {
+  animation: fadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) 0.03s both;
+}
+
+.animate-stagger-3 {
+  animation: fadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) 0.06s both;
+}
+
+.animate-stagger-4 {
+  animation: fadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) 0.09s both;
+}
+
+.animate-morph-in {
+  animation: morphIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-pulse-subtle {
+  animation: pulseSubtle 3s infinite;
+}
+
+/* ==========================================================================
+   قاعده سراسری بارگذاری داده‌ها (Strict Data Loading Rule):
+   به هیچ وجه مقدار دیفالت یا متن پیش‌فرض در صفحه نمایش داده نمی‌شود.
+   هر محتوایی که هنوز لود نشده با استایل مات و بلور شده و شیمر لودینگ نمایش داده می‌شود.
+   ========================================================================== */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 0.75rem;
+}
+
+.skeleton-shimmer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.04) 20%,
+    rgba(255, 255, 255, 0.08) 60%,
+    rgba(255, 255, 255, 0)
+  );
+  animation: shimmer 1.6s infinite;
+  content: '';
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.loading-blurred {
+  filter: blur(8px);
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+/* رعایت قاعده دسترسی‌پذیری و امنیت عملکرد (قاعده R-56 در دستگاه‌های ضعیف) */
+@media (prefers-reduced-motion: reduce) {
+  .animate-stagger-1,
+  .animate-stagger-2,
+  .animate-stagger-3,
+  .animate-stagger-4,
+  .animate-morph-in,
+  .animate-pulse-subtle,
+  .skeleton-shimmer::after {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

@@ -1,35 +1,78 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { messagesFa, RegisterSchema, StudentGrade } from '@condorlab/shared';
-import { AlertCircle } from 'lucide-react';
+import { Select } from '@/components/ui/select';
+import { messagesFa, RegisterSchema, StudentGrade, toPersianDigits } from '@condorlab/shared';
+import { AlertCircle, Check, X } from 'lucide-react';
 
-export default function SignupPage() {
+function getPasswordStrength(password: string) {
+  if (!password) {
+    return { score: 0, label: '', color: '', percent: 0, checks: [] };
+  }
+
+  const checks = [
+    { label: 'حداقل ۸ نویسه', pass: password.length >= 8 },
+    { label: 'شامل حروف کوچک و بزرگ (a-z, A-Z)', pass: /[a-z]/.test(password) && /[A-Z]/.test(password) },
+    { label: 'شامل اعداد (۰-۹)', pass: /\d/.test(password) },
+    { label: 'شامل نمادها یا کاراکتر ویژه (!@#$%...)', pass: /[^A-Za-z0-9]/.test(password) },
+  ];
+
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  if (score <= 1) {
+    return { score: 1, label: 'خیلی ضعیف', color: 'bg-red-500 text-red-400', percent: 20, checks };
+  } else if (score === 2) {
+    return { score: 2, label: 'ضعیف', color: 'bg-orange-500 text-orange-400', percent: 40, checks };
+  } else if (score === 3) {
+    return { score: 3, label: 'متوسط', color: 'bg-amber-500 text-amber-400', percent: 65, checks };
+  } else if (score === 4) {
+    return { score: 4, label: 'قوی', color: 'bg-emerald-500 text-emerald-400', percent: 85, checks };
+  } else {
+    return { score: 5, label: 'بسیار قوی', color: 'bg-green-500 text-green-400', percent: 100, checks };
+  }
+}
+
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/student/dashboard';
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
-    grade: StudentGrade.Grade10,
-    termsAccepted: true,
+    grade: '' as string,
+    termsAccepted: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const passwordStrength = getPasswordStrength(formData.password);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setGeneralError(null);
     setErrors({});
 
-    const result = RegisterSchema.safeParse(formData);
+    const payload = {
+      ...formData,
+      grade: formData.grade ? (formData.grade as StudentGrade) : undefined,
+    };
+
+    const result = RegisterSchema.safeParse(payload);
     if (!result.success) {
       const fieldErrors: Record<string, string> = {};
       result.error.issues.forEach((issue) => {
@@ -44,17 +87,24 @@ export default function SignupPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      if (!res.ok) {
-        setGeneralError(data.message || 'خطا در ثبت‌نام. لطفاً مجدداً تلاش فرمایید.');
+      if (!res.ok || !data?.success) {
+        setGeneralError(data?.message || 'خطا در ثبت‌نام. لطفاً مجدداً تلاش فرمایید.');
         return;
       }
 
-      router.push('/student/dashboard');
+      if (data.user) {
+        try {
+          localStorage.setItem('condor_user', JSON.stringify(data.user));
+          window.dispatchEvent(new Event('condor_auth_change'));
+        } catch {}
+      }
+
+      router.push(redirect);
     } catch {
       setGeneralError('خطا در برقراری ارتباط با سرور.');
     } finally {
@@ -67,11 +117,43 @@ export default function SignupPage() {
       <div className="w-full max-w-lg bg-[#181818] border border-[#2E2E2E] rounded-2xl p-6 sm:p-8 shadow-2xl">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
-            <img src="/favicon.svg" alt="کندرلب" width={32} height={32} className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
+            <img src="/favicon.svg" alt="کندرلب" className="w-8 h-8 rounded-lg shadow-sm" />
             <span className="text-xl font-black text-white tracking-tight">{messagesFa.common.brandName}</span>
           </Link>
           <h1 className="text-xl sm:text-2xl font-bold text-white mb-2">{messagesFa.auth.signup}</h1>
           <p className="text-xs sm:text-sm text-gray-400">عضویت در پلتفرم سنجش تحلیلی المپیاد زیست‌شناسی</p>
+        </div>
+
+        {/* دکمه ورود و ثبت‌نام سریع با گوگل */}
+        <button
+          type="button"
+          onClick={() => alert('ورود با گوگل در فاز تست فعال است')}
+          className="w-full min-h-[44px] flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl bg-[#242424] hover:bg-[#2C2C2C] border border-[#3A3A3A] text-sm text-white font-medium transition-colors mb-6"
+        >
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+            />
+          </svg>
+          <span>{messagesFa.auth.googleLogin}</span>
+        </button>
+
+        <div className="relative flex items-center justify-center mb-6">
+          <div className="border-t border-[#333333] w-full"></div>
+          <span className="bg-[#181818] px-3 text-xs text-gray-500 font-medium">یا تکمیل فرم ثبت‌نام</span>
         </div>
 
         {generalError && (
@@ -113,49 +195,95 @@ export default function SignupPage() {
             autoComplete="email"
           />
 
-          {/* انتخاب پایه تحصیلی با ممانعت از پایه دوازدهم */}
-          <div className="text-right">
-            <label className="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5">
-              پایه تحصیلی (المپیاد زیست)
-            </label>
-            <select
-              value={formData.grade}
-              onChange={(e) => setFormData({ ...formData, grade: e.target.value as StudentGrade })}
-              disabled={isLoading}
-              className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-[#181818] border border-[#333333] focus:border-[#FFCC00] focus:ring-2 focus:ring-[#FFCC00]/20 text-white text-sm focus:outline-none transition-all"
-            >
-              <option value={StudentGrade.Grade10}>پایه دهم (کانون اصلی المپیاد)</option>
-              <option value={StudentGrade.Grade11}>پایه یازدهم (کانون اصلی المپیاد)</option>
-              <option value={StudentGrade.Grade9}>پایه نهم (مطالعه مقدماتی)</option>
-              <option value={StudentGrade.Grade8}>پایه هشتم (آزمایشی)</option>
-              <option value={StudentGrade.Grade7}>پایه هفتم (آزمایشی)</option>
-            </select>
-            {errors.grade && <p className="mt-1.5 text-xs text-red-400">{errors.grade}</p>}
-          </div>
+          {/* انتخاب پایه تحصیلی - اختیاری */}
+          <Select
+            label="پایه تحصیلی (اختیاری — قابل تکمیل در مراحل بعد)"
+            value={formData.grade}
+            onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+            disabled={isLoading}
+            error={errors.grade}
+          >
+            <option value="" className="bg-[#181818] text-gray-400">
+              انتخاب بعداً (اختیاری)
+            </option>
+            <option value={StudentGrade.Grade10} className="bg-[#181818] text-white">
+              پایه دهم (کانون اصلی المپیاد)
+            </option>
+            <option value={StudentGrade.Grade11} className="bg-[#181818] text-white">
+              پایه یازدهم (کانون اصلی المپیاد)
+            </option>
+            <option value={StudentGrade.Grade9} className="bg-[#181818] text-white">
+              پایه نهم (مطالعه مقدماتی)
+            </option>
+            <option value={StudentGrade.Grade8} className="bg-[#181818] text-white">
+              پایه هشتم (آزمایشی)
+            </option>
+            <option value={StudentGrade.Grade7} className="bg-[#181818] text-white">
+              پایه هفتم (آزمایشی)
+            </option>
+          </Select>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label={messagesFa.auth.passwordLabel}
-              type="password"
-              placeholder="حداقل ۸ نویسه"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              error={errors.password}
-              disabled={isLoading}
-              dir="ltr"
-              autoComplete="new-password"
-            />
-            <Input
-              label="تکرار رمز عبور"
-              type="password"
-              placeholder="تکرار دقیق رمز"
-              value={formData.confirmPassword}
-              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-              error={errors.confirmPassword}
-              disabled={isLoading}
-              dir="ltr"
-              autoComplete="new-password"
-            />
+            <div>
+              <Input
+                label={messagesFa.auth.passwordLabel}
+                type="password"
+                placeholder="حداقل ۸ نویسه"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                error={errors.password}
+                disabled={isLoading}
+                dir="ltr"
+                autoComplete="new-password"
+              />
+              {formData.password && (
+                <div className="mt-2 space-y-1.5 p-2.5 rounded-lg bg-[#222222] border border-[#2E2E2E] text-right">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">
+                      طول رمز: <span className="font-bold text-white">{toPersianDigits(formData.password.length)}</span> کاراکتر
+                    </span>
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <span className="text-gray-400">قدرت:</span>
+                      <span className={passwordStrength.color.split(' ')[1]}>{passwordStrength.label}</span>
+                    </span>
+                  </div>
+
+                  {/* نوار قدرت رمز عبور */}
+                  <div className="h-1.5 w-full bg-[#181818] rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${passwordStrength.color.split(' ')[0]}`}
+                      style={{ width: `${passwordStrength.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div>
+              <Input
+                label="تکرار رمز عبور"
+                type="password"
+                placeholder="تکرار دقیق رمز"
+                value={formData.confirmPassword}
+                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                error={errors.confirmPassword}
+                disabled={isLoading}
+                dir="ltr"
+                autoComplete="new-password"
+              />
+              {formData.confirmPassword && (
+                <div className="mt-2 text-xs text-right">
+                  {formData.password === formData.confirmPassword ? (
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5 inline" /> تکرار رمز عبور مطابقت دارد
+                    </span>
+                  ) : (
+                    <span className="text-amber-400/90 flex items-center gap-1">
+                      <X className="w-3.5 h-3.5 inline" /> هنوز با رمز عبور اصلی یکسان نیست
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* تیک واحد پذیرش قوانین و رضایت سرپرست */}
@@ -181,11 +309,26 @@ export default function SignupPage() {
 
         <p className="mt-8 text-center text-xs text-gray-400">
           قبلاً ثبت‌نام کرده‌اید؟{' '}
-          <Link href="/login" className="text-[#FFCC00] font-bold hover:underline">
+          <Link
+            href={`/login${redirect !== '/student/dashboard' ? `?redirect=${encodeURIComponent(redirect)}` : ''}`}
+            className="text-[#FFCC00] font-bold hover:underline"
+          >
             {messagesFa.auth.login}
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">در حال بارگذاری...</div>
+      }
+    >
+      <SignupForm />
+    </Suspense>
   );
 }

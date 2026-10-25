@@ -1,41 +1,49 @@
-import { Controller, Get, Post, Body, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, BadRequestException } from '@nestjs/common';
 import { CheckoutService } from './checkout.service';
-import { AuthGuard } from '../../common/guards/auth.guard';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApplyCouponSchema, CompleteProfileSchema } from '@condorlab/shared';
+import type { Request } from 'express';
 
 @Controller('checkout')
 export class CheckoutController {
   constructor(private readonly checkoutService: CheckoutService) {}
 
-  @Get('preview')
-  async getPreview(
-    @Query('examId') examId: string,
-    @CurrentUser('id') userId?: string,
-  ) {
-    if (!examId) {
-      throw new BadRequestException('شناسه آزمون الزامی است.');
+  private extractUserId(req: Request): string {
+    const rawSession =
+      req.cookies?.condor_session || req.headers.authorization?.replace('Bearer ', '');
+    if (rawSession) {
+      try {
+        const [userId] = Buffer.from(rawSession, 'base64').toString('utf-8').split(':');
+        if (userId) return userId;
+      } catch {
+        // سشن نامعتبر
+      }
     }
-    const currentUserId = userId || 'mock-student-id';
+    // شناسه سشن موقت کلاینت
+    return (req.headers['x-client-session-id'] as string) || 'demo-student-session';
+  }
+
+  @Get('preview')
+  async getPreview(@Query('examId') examId: string, @Req() req: Request) {
+    if (!examId) {
+      throw new BadRequestException('شناسه یا اسلاگ آزمون الزامی است.');
+    }
+    const userId = this.extractUserId(req);
     return {
       success: true,
-      data: await this.checkoutService.getCheckoutPreview(currentUserId, examId),
+      data: await this.checkoutService.getCheckoutPreview(userId, examId),
     };
   }
 
   @Post('coupon')
-  async applyCoupon(
-    @Body() body: any,
-    @CurrentUser('id') userId?: string,
-  ) {
+  async applyCoupon(@Body() body: any, @Req() req: Request) {
     const parsed = ApplyCouponSchema.safeParse(body);
     if (!parsed.success) {
-      throw new BadRequestException(parsed.error.issues[0].message);
+      throw new BadRequestException(parsed.error.issues[0]?.message || 'کد تخفیف نامعتبر است.');
     }
 
-    const currentUserId = userId || 'mock-student-id';
+    const userId = this.extractUserId(req);
     const result = await this.checkoutService.validateAndApplyCoupon(
-      currentUserId,
+      userId,
       parsed.data.examId,
       parsed.data.code,
     );
@@ -47,37 +55,34 @@ export class CheckoutController {
   }
 
   @Post('complete-profile')
-  async completeProfile(
-    @Body() body: any,
-    @CurrentUser('id') userId?: string,
-  ) {
+  async completeProfile(@Body() body: any, @Req() req: Request) {
     const parsed = CompleteProfileSchema.safeParse(body);
     if (!parsed.success) {
-      throw new BadRequestException(parsed.error.issues[0].message);
+      throw new BadRequestException(parsed.error.issues[0]?.message || 'مشخصات وارد شده معتبر نمی‌باشد.');
     }
 
-    const currentUserId = userId || 'mock-student-id';
-    const updated = await this.checkoutService.completeProfile(currentUserId, parsed.data);
+    const userId = this.extractUserId(req);
+    const updated = await this.checkoutService.completeProfile(userId, parsed.data);
 
     return {
       success: true,
       data: updated,
-      message: 'مشخصات با موفقیت ذخیره گردید.',
+      message: 'مشخصات تحصیلی با موفقیت ذخیره گردید.',
     };
   }
 
   @Post('process')
   async processEnrollment(
     @Body() body: { examId: string; couponCode?: string },
-    @CurrentUser('id') userId?: string,
+    @Req() req: Request,
   ) {
     if (!body.examId) {
       throw new BadRequestException('شناسه آزمون مشخص نشده است.');
     }
 
-    const currentUserId = userId || 'mock-student-id';
+    const userId = this.extractUserId(req);
     const result = await this.checkoutService.processEnrollment(
-      currentUserId,
+      userId,
       body.examId,
       body.couponCode,
     );

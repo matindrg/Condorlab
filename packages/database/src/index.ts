@@ -39,6 +39,10 @@ if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'postgresql://condor_admin:condor_secret_1405@localhost:5432/condorlab_db?schema=public';
 }
 
+if (!process.env.DIRECT_URL) {
+  process.env.DIRECT_URL = process.env.DATABASE_URL;
+}
+
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 export const prisma =

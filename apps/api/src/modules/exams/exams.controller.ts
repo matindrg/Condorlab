@@ -1,14 +1,34 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req } from '@nestjs/common';
 import { ExamsService } from './exams.service';
+import type { Request } from 'express';
 
 @Controller('exams')
 export class ExamsController {
   constructor(private readonly examsService: ExamsService) {}
 
+  private extractUserId(req: Request): string | undefined {
+    const rawSession =
+      req.cookies?.condor_session || req.headers.authorization?.replace('Bearer ', '');
+    if (rawSession) {
+      try {
+        const [userId] = Buffer.from(rawSession, 'base64').toString('utf-8').split(':');
+        if (userId) return userId;
+      } catch {
+        // سشن نامعتبر
+      }
+    }
+    return (req.headers['x-client-session-id'] as string) || undefined;
+  }
+
   @Get()
-  async getExams(@Query('volume') volume?: string, @Query('search') search?: string) {
+  async getExams(
+    @Query('volume') volume?: string,
+    @Query('search') search?: string,
+    @Req() req?: Request,
+  ) {
     const volNum = volume ? parseInt(volume, 10) : undefined;
-    const exams = await this.examsService.findAll(volNum, search);
+    const userId = req ? this.extractUserId(req) : undefined;
+    const exams = await this.examsService.findAll(volNum, search, userId);
     return {
       success: true,
       count: exams.length,
@@ -16,9 +36,20 @@ export class ExamsController {
     };
   }
 
+  @Get('my-enrollments')
+  async getMyEnrollments(@Req() req: Request) {
+    const userId = this.extractUserId(req);
+    const enrollments = await this.examsService.getUserEnrolledExamIds(userId);
+    return {
+      success: true,
+      enrolledExamIds: enrollments,
+    };
+  }
+
   @Get(':slug')
-  async getExamBySlug(@Param('slug') slug: string) {
-    const exam = await this.examsService.findBySlug(slug);
+  async getExamBySlug(@Param('slug') slug: string, @Req() req?: Request) {
+    const userId = req ? this.extractUserId(req) : undefined;
+    const exam = await this.examsService.findBySlug(slug, userId);
     return {
       success: true,
       data: exam,

@@ -51,16 +51,18 @@ export class AuthController {
   }
 
   /**
-   * تنظیم کوکی امن HttpOnly با طول عمر ۳۰ روز
+   * تنظیم کوکی امن HttpOnly با طول عمر ۳۰ روز و انقضای دقیق تقویمی
    */
   private setSessionCookie(res: Response, userId: string, sessionId: string) {
     const rawToken = Buffer.from(`${userId}:${sessionId}`).toString('base64');
+    const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // ۳۰ روز دقیق
     res.cookie('condor_session', rawToken, {
       httpOnly: true, // ممانعت از خواندن توسط XSS
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // ۳۰ روز
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      expires,
     });
   }
 }

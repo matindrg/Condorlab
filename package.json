@@ -18,6 +18,9 @@
     "build:api": "npm run build --workspace=@condorlab/api",
     "db:generate": "npm run db:generate --workspace=@condorlab/database",
     "db:migrate": "npm run db:migrate --workspace=@condorlab/database",
+    "db:push": "npm run db:push --workspace=@condorlab/database",
+    "db:seed": "node scripts/seed.js",
+    "db:studio": "npm run db:studio --workspace=@condorlab/database",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "test": "playwright test"

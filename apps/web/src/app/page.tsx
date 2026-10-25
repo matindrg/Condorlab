@@ -4,7 +4,7 @@ import { messagesFa } from '@condorlab/shared';
 
 export default function HomePage() {
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen p-6 text-center max-w-5xl mx-auto">
+    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] p-6 text-center max-w-5xl mx-auto">
       {/* نشان بازگشت برند با آیکون وکتور واقعی */}
       <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1A1A1A] border border-[#2E2E2E] text-xs text-[#FFCC00] mb-8 font-medium">
         <img src="/favicon.svg" alt="کندرلب" width={16} height={16} className="w-4 h-4 shrink-0" />
@@ -70,6 +70,6 @@ export default function HomePage() {
           </li>
         </ul>
       </div>
-    </main>
+    </div>
   );
 }

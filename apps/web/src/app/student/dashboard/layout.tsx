@@ -1,0 +1,14 @@
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'داشبورد داوطلب | کندرلب',
+  description: 'مشاهده مشخصات ثبت‌شده و محصولات و آزمون‌های خریداری‌شده داوطلب در کندرلب.',
+};
+
+export default function StudentDashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return <>{children}</>;
+}

@@ -2,6 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 
+// پشتیبانی از سریال‌سازی فیلدهای BigInt (مانند telegramChatId) به رشته در خروجی‌های JSON
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
