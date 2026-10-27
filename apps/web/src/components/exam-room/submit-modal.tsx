@@ -21,6 +21,19 @@ export function SubmitModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // بستن مدال با زدن کلید Esc
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
+
   if (!isOpen) return null;
 
   const answeredCount = Object.values(answers).filter(
@@ -46,8 +59,16 @@ export function SubmitModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg p-6 bg-card border border-border rounded-3xl shadow-2xl text-card-foreground">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md animate-in fade-in duration-150 cursor-pointer"
+      onClick={() => {
+        if (!isSubmitting) onClose();
+      }}
+    >
+      <div
+        className="relative w-full max-w-lg p-6 bg-card border border-border rounded-3xl shadow-2xl text-card-foreground cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-3 pb-4 border-b border-border">
           <div className="p-2.5 rounded-2xl bg-destructive/10 text-destructive">
             <AlertOctagon className="w-6 h-6" />
@@ -104,8 +125,16 @@ export function SubmitModal({
         </div>
 
         {error && (
-          <div className="mt-3 p-3 text-xs rounded-xl bg-destructive/10 text-destructive border border-destructive/20 font-medium">
-            {error}
+          <div className="mt-4 p-4 rounded-2xl bg-red-500/15 border-2 border-red-500/40 text-red-600 dark:text-red-400 font-medium text-xs flex items-start gap-3 shadow-lg shadow-red-500/10">
+            <AlertOctagon className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <span className="font-bold text-sm text-red-600 dark:text-red-400 block">
+                خطا در ثبت نهایی پاسخ‌برگ:
+              </span>
+              <p className="leading-relaxed text-xs">
+                {error}
+              </p>
+            </div>
           </div>
         )}
 
@@ -121,7 +150,7 @@ export function SubmitModal({
           <button
             onClick={handleConfirm}
             disabled={isSubmitting}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-bold text-white bg-destructive hover:bg-destructive/90 rounded-xl transition-colors shadow-lg shadow-destructive/20 disabled:opacity-50"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-xl transition-colors shadow-lg shadow-red-600/30 disabled:opacity-50"
           >
             {isSubmitting ? (
               <>

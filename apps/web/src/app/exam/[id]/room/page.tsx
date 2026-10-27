@@ -6,6 +6,7 @@ import {
   useExamHeartbeat,
   TakeoverInfo,
 } from '@/hooks/use-exam-heartbeat';
+import { getOrCreateDeviceId } from '@/lib/device';
 import { ExamHeader } from '@/components/exam-room/exam-header';
 import { DualViewContainer, ExamQuestionView } from '@/components/exam-room/dual-view-container';
 import { OmrSheet } from '@/components/exam-room/omr-sheet';
@@ -21,11 +22,18 @@ import {
   ArrowRight,
   Sheet,
   BookOpen,
+  Clock,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface ExamRoomData {
+  hasStarted?: boolean;
+  canStart?: boolean;
   isSubmitted: boolean;
   submittedAt?: string;
+  isGracePeriod?: boolean;
+  graceRemainingSeconds?: number;
+  examTitle?: string;
   exam: {
     id: string;
     slug: string;
@@ -38,6 +46,7 @@ interface ExamRoomData {
     id: string;
     startedAt: string;
     takeoverCount: number;
+    remainingTakeovers?: number;
     status: string;
   };
   questions: ExamQuestionView[];
@@ -64,6 +73,13 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<'content' | 'omr'>('content');
   const [submissionSummary, setSubmissionSummary] = useState<any>(null);
+  const [isAutoSubmitting, setIsAutoSubmitting] = useState(false);
+
+  const isReadOnly = Boolean(
+    roomData?.isSubmitted ||
+      (roomData && roomData.remainingSeconds <= 0) ||
+      submissionSummary
+  );
 
   // بارگذاری داده‌های اتاق آزمون
   useEffect(() => {
@@ -71,14 +87,7 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     async function loadRoom() {
       try {
         setIsLoading(true);
-        let did = '';
-        if (typeof window !== 'undefined') {
-          did = localStorage.getItem('condor_device_id') || '';
-          if (!did) {
-            did = `dev_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
-            localStorage.setItem('condor_device_id', did);
-          }
-        }
+        const did = getOrCreateDeviceId();
 
         const res = await fetch(`/api/exam-room/${examIdentifier}/init`, {
           cache: 'no-store',
@@ -94,6 +103,24 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
 
         if (isMounted) {
           setRoomData(data);
+          if (
+            typeof window !== 'undefined' &&
+            data.remainingSeconds > 0 &&
+            !data.isSubmitted &&
+            data.hasStarted !== false
+          ) {
+            localStorage.setItem(
+              'condor_active_exam',
+              JSON.stringify({
+                slug: data.exam?.slug || examIdentifier,
+                title: data.exam?.title || 'آزمون المپیاد',
+                attemptId: data.attempt?.id,
+                expiryAt: Date.now() + data.remainingSeconds * 1000,
+                userId: data.studentInfo?.userId,
+              }),
+            );
+            window.dispatchEvent(new Event('condor_active_exam_change'));
+          }
         }
       } catch (err: any) {
         if (isMounted) {
@@ -112,6 +139,46 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     };
   }, [examIdentifier]);
 
+  const [isStarting, setIsStarting] = useState(false);
+
+  const handleStartExam = async () => {
+    setIsStarting(true);
+    setInitError(null);
+    try {
+      const did = getOrCreateDeviceId();
+      const res = await fetch(`/api/exam-room/${examIdentifier}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': did,
+        },
+        body: JSON.stringify({ deviceId: did }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'خطا در شروع رسمی آزمون.');
+      }
+      setRoomData(data);
+      if (typeof window !== 'undefined' && data.remainingSeconds > 0 && !data.isSubmitted) {
+        localStorage.setItem(
+          'condor_active_exam',
+          JSON.stringify({
+            slug: data.exam?.slug || examIdentifier,
+            title: data.exam?.title || 'آزمون المپیاد',
+            attemptId: data.attempt?.id,
+            expiryAt: Date.now() + data.remainingSeconds * 1000,
+            userId: data.studentInfo?.userId,
+          }),
+        );
+        window.dispatchEvent(new Event('condor_active_exam_change'));
+      }
+    } catch (e: any) {
+      setInitError(e.message || 'خطا در شروع آزمون.');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
   // راه‌اندازی هوک قفل و ضربان قلب
   const {
     status,
@@ -120,6 +187,8 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     lastSyncTime,
     takeoverInfo,
     recordAnswer,
+    recordStatement,
+    recordNumeric,
     toggleFlag,
     takeoverExam,
     submitExam,
@@ -129,7 +198,9 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     attemptId: roomData?.attempt?.id || '',
     examSlug: roomData?.exam?.slug || examIdentifier,
     initialAnswers: roomData?.answers || {},
-    enabled: !!roomData && !roomData.isSubmitted,
+    initialRemainingTakeovers: roomData?.attempt?.remainingTakeovers ?? 2,
+    deviceId: getOrCreateDeviceId(),
+    enabled: !!roomData && !roomData.isSubmitted && roomData.hasStarted !== false,
     onSubmitted: () => {
       // وضعیت نهایی
     },
@@ -140,7 +211,10 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     if (!roomData?.questions) return;
     for (let i = 1; i <= roomData.questions.length; i++) {
       const ans = answers[i];
-      if (!ans || ans.selectedOption === null) {
+      const hasOption = ans?.selectedOption !== null && ans?.selectedOption !== undefined && ans.selectedOption > 0;
+      const hasStatements = ans?.selectedStatements && Object.values(ans.selectedStatements).some((v) => v !== null && v !== undefined);
+      const hasNumeric = ans?.numericValue !== null && ans?.numericValue !== undefined;
+      if (!ans || (!hasOption && !hasStatements && !hasNumeric)) {
         setActiveQuestion(i);
         return;
       }
@@ -204,7 +278,24 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
       }
 
       // کلیدهای میانبر آزمون
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || isReadOnly) {
+        return;
+      }
+
+      // بستن مدال‌ها با Esc و عدم اجرای شورت‌کات‌ها در صورت باز بودن مدال
+      if (isSubmitModalOpen || isShortcutsModalOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setIsSubmitModalOpen(false);
+          setIsShortcutsModalOpen(false);
+        }
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsSubmitModalOpen(false);
+        setIsShortcutsModalOpen(false);
         return;
       }
 
@@ -232,18 +323,55 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
       }
     };
 
+    // هشدار خروج ناخواسته از آزمون (Navigation Guard)
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'آزمون شما در حال برگزاری است و تایمر متوقف نمی‌شود. آیا از خروج اطمینان دارید؟';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
     document.addEventListener('contextmenu', handleContextMenu);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [roomData, activeQuestion, recordAnswer, toggleFlag, sendTelemetry, handleJumpToFirstUnanswered]);
+  }, [
+    roomData,
+    activeQuestion,
+    recordAnswer,
+    toggleFlag,
+    sendTelemetry,
+    handleJumpToFirstUnanswered,
+    isSubmitModalOpen,
+    isShortcutsModalOpen,
+  ]);
+
+  // ثبت خودکار در صورت اتمام مهلت آزمون
+  useEffect(() => {
+    if (
+      roomData &&
+      roomData.remainingSeconds <= 0 &&
+      !roomData.isSubmitted &&
+      status !== 'submitted' &&
+      !submissionSummary &&
+      !isAutoSubmitting
+    ) {
+      setIsAutoSubmitting(true);
+      submitExam()
+        .then((res) => {
+          if (res?.success) setSubmissionSummary(res.summary);
+        })
+        .finally(() => setIsAutoSubmitting(false));
+    }
+  }, [roomData, status, submissionSummary, isAutoSubmitting, submitExam]);
 
   // ثبت نهایی پاسخ‌برگ
   const handleFinalSubmit = async () => {
@@ -292,8 +420,97 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  // اگر آزمون قبلاً ارسال شده باشد یا تازه ارسال شده باشد
-  if (roomData.isSubmitted || status === 'submitted' || submissionSummary) {
+  // حالت پیش از شروع (Pre-Start State): صندلی رزرو شده اما آزمون هنوز آغاز نشده است
+  if (roomData.hasStarted === false) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+        <div className="p-8 sm:p-10 rounded-3xl bg-card border border-primary/30 shadow-2xl text-center max-w-xl w-full space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-primary/10 text-primary flex items-center justify-center mx-auto border border-primary/20">
+            <ShieldCheck className="w-10 h-10" />
+          </div>
+
+          <div>
+            <span className="text-xs font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20 inline-block mb-2">
+              صندلی رسمی شما رزرو شده است
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-foreground">
+              {roomData.exam?.title || roomData.examTitle || 'اتاق آزمون المپیاد'}
+            </h1>
+            <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+              داوطلب گرامی، شما وارد لابی آزمون شده‌اید. تا پیش از کلیک روی دکمه شروع آزمون، زمان‌سنج فعال نخواهد شد.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-muted/40 border border-border text-xs text-right space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-border/50">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-primary" />
+                مدت زمان پاسخ‌گویی:
+              </span>
+              <span className="font-mono font-bold text-foreground">
+                {roomData.exam?.durationMinutes || 120} دقیقه
+              </span>
+            </div>
+            <div className="flex items-center justify-between pb-2 border-b border-border/50">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <BookOpen className="w-4 h-4 text-primary" />
+                تعداد سؤالات:
+              </span>
+              <span className="font-mono font-bold text-foreground">
+                {roomData.exam?.totalQuestions || 60} سؤال
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                پایداری و قفل نشست:
+              </span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                تک‌نشست با ۲ دقیقه مهلت اضطراری آفلاین
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-400 text-xs text-right leading-relaxed flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+            <span>
+              <strong>قانون تک‌دستگاه (Anti-Cheat):</strong> به محض شروع، این آزمون روی همین مرورگر قفل خواهد شد و خروج از پنجره یا تعویض تب در کارنامه ثبت می‌گردد.
+            </span>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => router.push('/student/dashboard')}
+              disabled={isStarting}
+              className="px-5 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-xl transition-colors"
+            >
+              بازگشت به داشبورد
+            </button>
+            <button
+              onClick={handleStartExam}
+              disabled={isStarting}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-bold text-black bg-[#FFCC00] hover:bg-[#FFD633] active:bg-[#E6B800] rounded-xl transition-all shadow-lg shadow-[#FFCC00]/25 disabled:opacity-50"
+            >
+              {isStarting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-black" />
+                  در حال آماده‌سازی صندلی آزمون...
+                </>
+              ) : (
+                <>
+                  شروع رسمی آزمون
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // اگر آزمون قبلاً ارسال شده باشد یا زمان آن به پایان رسیده باشد
+  if (roomData.isSubmitted || roomData.remainingSeconds <= 0 || status === 'submitted' || submissionSummary) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
         <div className="p-8 sm:p-10 rounded-3xl bg-card border border-emerald-500/30 shadow-2xl text-center max-w-lg w-full space-y-6">
@@ -302,9 +519,13 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
           </div>
 
           <div>
-            <h1 className="text-xl font-bold text-foreground">پاسخ‌برگ شما با موفقیت ثبت شد</h1>
+            <h1 className="text-xl font-bold text-foreground">
+              {roomData.isSubmitted || status === 'submitted' || submissionSummary
+                ? 'پاسخ‌برگ شما با موفقیت ثبت شد'
+                : 'مهلت پاسخ‌گویی به آزمون به پایان رسید'}
+            </h1>
             <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              آزمون «{roomData.exam.title}» برای شما به پایان رسید و پاسخ‌های شما در سرور مرکزی کندرلب قفل گردید.
+              آزمون «{roomData.exam?.title || (roomData as any).examTitle || 'المپیاد'}» برای شما به پایان رسید و پاسخ‌های شما در سرور مرکزی کندرلب قفل گردید.
             </p>
           </div>
 
@@ -348,25 +569,29 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
   const currentAnswer = answers[activeQuestion];
 
   return (
-    <div className="min-h-screen bg-muted/20 flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-muted/20 flex flex-col font-sans select-none relative">
       {/* واترمارک امنیتی ضد نشت */}
       <WatermarkOverlay
-        studentName={roomData.studentInfo.name}
-        studentId={roomData.studentInfo.userId}
-        attemptId={roomData.attempt.id}
+        studentName={roomData.studentInfo?.name || 'دانش‌آموز کندرلب'}
+        studentId={roomData.studentInfo?.userId || 'CL-STD'}
+        attemptId={roomData.attempt?.id || ''}
       />
 
       {/* هدر ثابت اتاق آزمون */}
       <ExamHeader
-        title={roomData.exam.title}
+        title={roomData.exam?.title || (roomData as any).examTitle || 'آزمون شبیه‌ساز المپیاد'}
         code="CL-101"
-        remainingSeconds={roomData.remainingSeconds}
+        remainingSeconds={roomData.remainingSeconds || 0}
         status={status}
         lastSyncTime={lastSyncTime}
         remainingTakeovers={remainingTakeovers}
         onOpenShortcuts={() => setIsShortcutsModalOpen(true)}
         onRequestSubmit={() => setIsSubmitModalOpen(true)}
-        onTimeExpired={() => setIsSubmitModalOpen(true)}
+        onTimeExpired={async () => {
+          setIsAutoSubmitting(true);
+          await handleFinalSubmit();
+          setIsAutoSubmitting(false);
+        }}
       />
 
       {/* نوار ناوبری موبایل (سوییچ بین دفترچه سوالات و پاسخ‌برگ OMR) */}
@@ -404,13 +629,18 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
           }`}
         >
           <DualViewContainer
-            questions={roomData.questions}
+            questions={roomData.questions || []}
             activeQuestionNumber={activeQuestion}
             selectedOption={currentAnswer?.selectedOption ?? null}
+            selectedStatements={currentAnswer?.selectedStatements ?? null}
+            numericValue={currentAnswer?.numericValue ?? null}
             isFlagged={currentAnswer?.isFlagged ?? false}
+            readOnly={isReadOnly}
             onSelectQuestion={(qNum) => setActiveQuestion(qNum)}
             onSelectOption={(qNum, opt) => recordAnswer(qNum, opt)}
-            onClearOption={(qNum) => recordAnswer(qNum, null)}
+            onSelectStatement={recordStatement}
+            onSelectNumeric={recordNumeric}
+            onClearOption={(qNum) => recordAnswer(qNum, null, null, null)}
             onToggleFlag={(qNum) => toggleFlag(qNum)}
           />
         </section>
@@ -422,23 +652,28 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
           }`}
         >
           <OmrSheet
-            totalQuestions={roomData.questions.length}
+            totalQuestions={roomData.questions?.length || 0}
             activeQuestion={activeQuestion}
             answers={answers}
+            questions={roomData.questions || []}
+            readOnly={isReadOnly}
             onSelectQuestion={(qNum) => {
               setActiveQuestion(qNum);
               setMobileTab('content');
             }}
             onSelectOption={(qNum, opt) => recordAnswer(qNum, opt)}
-            onClearOption={(qNum) => recordAnswer(qNum, null)}
+            onSelectStatement={recordStatement}
+            onSelectNumeric={recordNumeric}
+            onClearOption={(qNum) => recordAnswer(qNum, null, null, null)}
+            onToggleFlag={(qNum) => toggleFlag(qNum)}
             onJumpToFirstUnanswered={handleJumpToFirstUnanswered}
           />
         </section>
       </main>
 
-      {/* مدال تیک‌اوور (ورود دستگاه دیگر یا قطع قفل) */}
+      {/* مدال تیک‌اوور (فقط برای ورود دستگاه دوم یا تسخیر صریح) */}
       <TakeoverModal
-        isOpen={status === 'takeover_required' || status === 'lock_lost' || !!takeoverInfo}
+        isOpen={(status === 'takeover_required' || status === 'lock_lost') && !!takeoverInfo}
         info={takeoverInfo}
         onTakeover={takeoverExam}
         onDismiss={() => setTakeoverInfo(null)}
@@ -458,6 +693,19 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
       />
+
+      {/* لایه قفل خودکار در حال اتمام آزمون */}
+      {isAutoSubmitting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md">
+          <div className="p-8 rounded-3xl bg-card border border-primary/20 shadow-2xl text-center max-w-sm w-full space-y-4">
+            <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
+            <h3 className="text-base font-bold text-foreground">مهلت آزمون به پایان رسید</h3>
+            <p className="text-xs text-muted-foreground">
+              در حال ثبت خودکار پاسخ‌برگ و همگام‌سازی نهایی با سرور مرکزی...
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

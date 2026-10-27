@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/auth-context';
 import { INITIAL_CATALOG_EXAMS } from '@/lib/catalog';
+import { formatGrade } from '@condorlab/shared';
 import {
   User,
   Mail,
@@ -27,6 +28,7 @@ import {
   LogIn,
   HelpCircle,
   ExternalLink,
+  Laptop,
 } from 'lucide-react';
 
 interface PurchasedProduct {
@@ -45,6 +47,14 @@ interface PurchasedProduct {
   campbellVolumes?: number[];
   startTime?: string;
   endTime?: string;
+  remainingSeconds?: number;
+  isLiveActive?: boolean;
+  startedAt?: string;
+  submittedAt?: string;
+  isSessionLocked?: boolean;
+  lockedDeviceId?: string;
+  lockedAt?: string;
+  lastHeartbeatAt?: string;
 }
 
 interface UserProfile {
@@ -144,6 +154,7 @@ export default function StudentDashboardPage() {
   // واکشی داده‌های داشبورد از API
   const fetchDashboardData = useCallback(async () => {
     try {
+      setLoading(true);
       const res = await fetch('/api/dashboard/overview', { cache: 'no-store' });
       if (res.ok) {
         const json = await res.json();
@@ -170,6 +181,43 @@ export default function StudentDashboardPage() {
 
           // دریافت قطعی محصولات خریداری‌شده از سرور دیتابیس
           const fetchedProducts: PurchasedProduct[] = json.data.purchasedProducts || [];
+
+          // اطمینان از نمایش آزمون‌های ثبت‌نامی کاربر در صورت تأخیر همگام‌سازی دیتابیس یا وضعیت لوکال
+          if (Array.isArray(enrolledExamIds) && enrolledExamIds.length > 0) {
+            for (const enrolledId of enrolledExamIds) {
+              const alreadyExists = fetchedProducts.some(
+                (p) => p.id === enrolledId || p.slug === enrolledId,
+              );
+              if (!alreadyExists) {
+                const matchedExam = INITIAL_CATALOG_EXAMS.find(
+                  (e) => e.id === enrolledId || e.slug === enrolledId,
+                );
+                if (matchedExam) {
+                  fetchedProducts.push({
+                    id: matchedExam.id,
+                    title: matchedExam.title,
+                    slug: matchedExam.slug,
+                    type: matchedExam.category === 'stage2' ? 'شبیه‌ساز تخصصی مرحله ۲' : 'آزمون شبیه‌ساز',
+                    orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
+                    price: matchedExam.price,
+                    payableAmount: matchedExam.price,
+                    status: 'not_started',
+                    accessType: 'رسمی (با رتبه)',
+                    purchasedAt: new Date().toISOString(),
+                    durationMinutes: matchedExam.durationMinutes,
+                    totalQuestions: matchedExam.totalQuestions,
+                    campbellVolumes: matchedExam.campbellVolumes,
+                    startTime: matchedExam.startTime,
+                    endTime: matchedExam.endTime,
+                    remainingSeconds: matchedExam.durationMinutes * 60,
+                    isLiveActive: false,
+                    isSessionLocked: false,
+                  });
+                }
+              }
+            }
+          }
+
           setProducts(fetchedProducts);
           return;
         }
@@ -207,7 +255,7 @@ export default function StudentDashboardPage() {
                 orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
                 price: matchedExam.price,
                 payableAmount: matchedExam.price,
-                status: 'in_progress',
+                status: 'not_started',
                 accessType: 'رسمی (با رتبه)',
                 purchasedAt: new Date().toISOString(),
                 durationMinutes: matchedExam.durationMinutes,
@@ -230,6 +278,16 @@ export default function StudentDashboardPage() {
 
   useEffect(() => {
     fetchDashboardData();
+
+    // همگام‌سازی منحصراً در صورت تغییر نشست احراز هویت (بدون رفرش مزاحم هنگام تعویض تب مرورگر)
+    const handleAuthChange = () => {
+      fetchDashboardData();
+    };
+
+    window.addEventListener('condor_auth_change', handleAuthChange);
+    return () => {
+      window.removeEventListener('condor_auth_change', handleAuthChange);
+    };
   }, [fetchDashboardData]);
 
   // تنظیم مقادیر اولیه فرم ویرایش مشخصات
@@ -397,7 +455,7 @@ export default function StudentDashboardPage() {
                   {profile?.fullName || 'داوطلب گرامی'}
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FFCC00]/15 text-[#FFCC00] border border-[#FFCC00]/30">
-                  {profile?.grade ? `پایه ${profile.grade}` : 'داوطلب المپیاد'}
+                  {profile?.grade ? formatGrade(profile.grade) : 'داوطلب المپیاد'}
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3" />
@@ -413,10 +471,14 @@ export default function StudentDashboardPage() {
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <div className="px-4 py-3 rounded-2xl bg-black/40 border border-white/5 flex-1 sm:flex-initial text-center sm:text-right">
               <span className="text-[11px] text-gray-400 block mb-0.5">محصولات و آزمون‌ها</span>
-              <span className="text-lg font-black text-[#FFCC00]">
-                {products.length}{' '}
-                <span className="text-xs font-normal text-gray-300">مورد فعال</span>
-              </span>
+              {loading ? (
+                <div className="h-6 w-20 skeleton-shimmer mt-0.5 backdrop-blur-md"></div>
+              ) : (
+                <span className="text-lg font-black text-[#FFCC00]">
+                  {products.length}{' '}
+                  <span className="text-xs font-normal text-gray-300">مورد فعال</span>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -586,7 +648,7 @@ export default function StudentDashboardPage() {
                     پایه تحصیلی
                   </span>
                   <span className="text-xs font-bold text-[#FFCC00]">
-                    {profile?.grade ? `پایه ${profile.grade}` : 'تعیین نشده'}
+                    {profile?.grade ? formatGrade(profile.grade) : 'تعیین نشده'}
                   </span>
                 </div>
 
@@ -661,13 +723,53 @@ export default function StudentDashboardPage() {
               </div>
             </div>
 
-            <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-white/5 text-gray-300 border border-white/10">
-              {products.length} محصول
+            <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-white/5 text-gray-300 border border-white/10 min-w-[70px] inline-flex items-center justify-center">
+              {loading ? (
+                <span className="w-12 h-4 skeleton-shimmer inline-block"></span>
+              ) : (
+                `${products.length} محصول`
+              )}
             </span>
           </div>
 
-          {products.length === 0 ? (
-            /* وضعیت خالی بدون خرید */
+          {loading ? (
+            /* حالت بلوری شیمر در حال بارگذاری آزمون‌ها و محصولات (Strict Data Loading) */
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="rounded-3xl bg-[#16181D]/80 border border-[#2A2E39] p-5 sm:p-6 skeleton-shimmer backdrop-blur-md flex flex-col justify-between min-h-[175px]"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-20 h-5 bg-white/10 rounded-md"></div>
+                        <div className="w-20 h-5 bg-white/10 rounded-md"></div>
+                        <div className="w-28 h-5 bg-white/10 rounded-md"></div>
+                      </div>
+                      <div className="w-52 sm:w-72 h-6 bg-white/10 rounded-lg"></div>
+                    </div>
+                    <div className="w-24 h-6 bg-white/10 rounded-lg"></div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-3 border-t border-white/5 mb-4">
+                    <div className="w-24 h-4 bg-white/5 rounded"></div>
+                    <div className="w-24 h-4 bg-white/5 rounded"></div>
+                    <div className="w-32 h-4 bg-white/5 rounded"></div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/5">
+                    <div className="w-32 h-4 bg-white/5 rounded"></div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-8 bg-white/10 rounded-xl"></div>
+                      <div className="w-28 h-8 bg-white/10 rounded-xl"></div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : products.length === 0 ? (
+            /* وضعیت خالی بدون خرید (فقط و فقط پس از اتمام واکشی از سرور دیتابیس) */
             <div className="bg-[#181818] border border-[#2E3340] rounded-3xl p-8 text-center shadow-xl space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 text-gray-400 flex items-center justify-center mx-auto">
                 <BookOpen className="w-8 h-8" />
@@ -691,95 +793,185 @@ export default function StudentDashboardPage() {
               </div>
             </div>
           ) : (
-            /* لیست کارت‌های محصولات خریداری‌شده */
+            /* لیست کارت‌های محصولات خریداری‌شده با وضعیت‌های بصری تفکیک‌شده */
             <div className="space-y-4">
-              {products.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-[#181818] border border-[#2E3340] hover:border-[#FFCC00]/50 rounded-3xl p-5 sm:p-6 transition-all duration-200 shadow-xl group relative overflow-hidden"
-                >
-                  <div className="absolute top-0 right-0 w-2 h-full bg-[#FFCC00]"></div>
+              {products.map((item) => {
+                const isLive = Boolean(
+                  item.isLiveActive ||
+                  (item.startedAt && item.status === 'in_progress' && (item.remainingSeconds === undefined || item.remainingSeconds > 0))
+                );
+                const isSubmitted = item.status === 'submitted' || Boolean(item.startedAt && item.remainingSeconds !== undefined && item.remainingSeconds <= 0);
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                    <div className="pr-3">
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[#FFCC00]/15 text-[#FFCC00] border border-[#FFCC00]/30">
-                          {item.type || 'آزمون شبیه‌ساز'}
-                        </span>
-                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" />
-                          {item.accessType || 'صندلی رسمی'}
-                        </span>
-                        <span className="text-[11px] font-mono text-gray-400">
-                          شماره سفارش: {item.orderNumber}
+                return (
+                  <div
+                    key={item.id}
+                    className={`rounded-3xl p-5 sm:p-6 transition-all duration-200 shadow-xl group relative overflow-hidden border ${
+                      isLive
+                        ? 'bg-gradient-to-br from-[#1F1C14] to-[#16171B] border-amber-500/70 shadow-amber-500/10'
+                        : isSubmitted
+                        ? 'bg-[#181818] border-emerald-500/30'
+                        : 'bg-[#181818] border-[#2E3340] hover:border-[#FFCC00]/50'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-0 right-0 w-2 h-full ${
+                        isLive ? 'bg-amber-500 animate-pulse' : isSubmitted ? 'bg-emerald-500' : 'bg-[#FFCC00]'
+                      }`}
+                    ></div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                      <div className="pr-3">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[#FFCC00]/15 text-[#FFCC00] border border-[#FFCC00]/30">
+                            {item.type || 'آزمون شبیه‌ساز'}
+                          </span>
+
+                          {/* وضعیت بصری داینامیک صندلی آزمون */}
+                          {isLive ? (
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
+                              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+                              در حال برگزاری و شرکت
+                            </span>
+                          ) : isSubmitted ? (
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              آزمون پایان‌یافته و ثبت شد
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              آماده شروع
+                            </span>
+                          )}
+
+                          {item.lockedDeviceId && (
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                              <Laptop className="w-3 h-3 text-amber-400" />
+                              <span>قفل نشست: <span className="font-mono">{item.lockedDeviceId}</span></span>
+                            </span>
+                          )}
+
+                          <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3" />
+                            {item.accessType || 'صندلی رسمی'}
+                          </span>
+
+                          <span className="text-[11px] font-mono text-gray-400">
+                            سفارش: {item.orderNumber}
+                          </span>
+                        </div>
+
+                        <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-[#FFCC00] transition-colors">
+                          {item.title}
+                        </h3>
+                      </div>
+
+                      <div className="text-left shrink-0 pr-3 sm:pr-0">
+                        <div className="text-sm font-black text-white">
+                          {item.price === 0 ? (
+                            <span className="text-emerald-400">رایگان (بورسیه پایلوت)</span>
+                          ) : (
+                            <span>
+                              {item.payableAmount?.toLocaleString('fa-IR') || item.price.toLocaleString('fa-IR')}{' '}
+                              <span className="text-[10px] font-normal text-gray-400">تومان</span>
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-medium block mt-0.5">
+                          پرداخت قطعی و تایید شده
                         </span>
                       </div>
-                      <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-[#FFCC00] transition-colors">
-                        {item.title}
-                      </h3>
                     </div>
 
-                    <div className="text-left shrink-0 pr-3 sm:pr-0">
-                      <div className="text-sm font-black text-white">
-                        {item.price === 0 ? (
-                          <span className="text-emerald-400">رایگان (بورسیه پایلوت)</span>
-                        ) : (
-                          <span>
-                            {item.payableAmount?.toLocaleString('fa-IR') || item.price.toLocaleString('fa-IR')}{' '}
-                            <span className="text-[10px] font-normal text-gray-400">تومان</span>
+                    {/* ویژگی‌های آزمون و زمان باقیمانده */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-3 border-t border-white/5 text-xs text-gray-300 pr-3 mb-4">
+                      {isLive && item.remainingSeconds !== undefined && item.remainingSeconds > 0 ? (
+                        <div className="flex items-center gap-1.5 text-amber-400 font-bold col-span-2 sm:col-span-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                          <span>زمان باقیمانده: {Math.ceil(item.remainingSeconds / 60)} دقیقه</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-gray-500" />
+                          <span>مدت آزمون: {item.durationMinutes} دقیقه</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-gray-500" />
+                        <span>{item.totalQuestions} سوال تحلیلی</span>
+                      </div>
+
+                      {item.campbellVolumes && item.campbellVolumes.length > 0 && (
+                        <div className="flex items-center gap-1.5 col-span-2 sm:col-span-1">
+                          <GraduationCap className="w-3.5 h-3.5 text-[#FFCC00]" />
+                          <span>جلد کمپبل: {item.campbellVolumes.join(' و ')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* دکمه‌های اکشن */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/5 pr-3">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-gray-500" />
+                          {isLive ? 'نشست آزمون فعال روی حساب شما' : 'صندلی فعال و رزرو شده'}
+                        </span>
+
+                        {item.lockedDeviceId && (
+                          <span className="text-[11px] text-amber-400/90 flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                            <Laptop className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>آخرین دیوایس قفل‌شده: <span className="font-mono font-bold text-amber-300">{item.lockedDeviceId}</span></span>
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-emerald-400 font-medium block mt-0.5">
-                        پرداخت قطعی و تایید شده
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* ویژگی‌های آزمون */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-3 border-t border-white/5 text-xs text-gray-300 pr-3 mb-4">
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-gray-500" />
-                      <span>مدت: {item.durationMinutes} دقیقه</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5 text-gray-500" />
-                      <span>{item.totalQuestions} سوال تحلیلی</span>
-                    </div>
-                    {item.campbellVolumes && item.campbellVolumes.length > 0 && (
-                      <div className="flex items-center gap-1.5 col-span-2 sm:col-span-1">
-                        <GraduationCap className="w-3.5 h-3.5 text-[#FFCC00]" />
-                        <span>جلد کمپبل: {item.campbellVolumes.join(' و ')}</span>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/exams/${item.slug}`}
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium text-xs transition-colors border border-white/10"
+                        >
+                          جزئیات
+                        </Link>
+
+                        {isLive ? (
+                          <Link
+                            href={`/exam/${item.slug}/room`}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition-colors shadow-lg shadow-amber-500/20 animate-pulse"
+                          >
+                            <span>بازگشت به اتاق آزمون (در حال برگزاری)</span>
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                          </Link>
+                        ) : item.status === 'graded' ? (
+                          <Link
+                            href={`/student/report-card?attemptId=${item.id}`}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#FFD633] text-black font-black text-xs transition-colors shadow-lg shadow-[#FFCC00]/20"
+                          >
+                            <span>مشاهده کارنامه تحلیلی</span>
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                          </Link>
+                        ) : isSubmitted ? (
+                          <Link
+                            href={`/exam/${item.slug}/room`}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-md shadow-emerald-600/20"
+                          >
+                            <span>مشاهده خلاصه پاسخ‌برگ</span>
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                          </Link>
+                        ) : (
+                          <Link
+                            href={`/exam/${item.slug}/room`}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#E6B800] text-black font-bold text-xs transition-colors shadow-md shadow-[#FFCC00]/15"
+                          >
+                            <span>شروع آزمون</span>
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
                       </div>
-                    )}
-                  </div>
-
-                  {/* دکمه‌های اکشن */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/5 pr-3">
-                    <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-gray-500" />
-                      صندلی فعال و رزرو شده
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/exams/${item.slug}`}
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium text-xs transition-colors border border-white/10"
-                      >
-                        جزئیات
-                      </Link>
-
-                      <Link
-                        href={`/exam/${item.slug}/room`}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#E6B800] text-black font-bold text-xs transition-colors shadow-md shadow-[#FFCC00]/15"
-                      >
-                        <span>ورود به اتاق آزمون</span>
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                      </Link>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

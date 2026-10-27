@@ -78,6 +78,23 @@ export class ExamsService {
       isCapacityVisible: true,
       officialEnrolledCount: 2,
     },
+    {
+      id: 'exm-resilience-1m',
+      slug: 'offline-resilience-1min-test',
+      title: 'آزمون شبیه‌ساز تست پایداری شبکه و بازیابی (۱ دقیقه‌ای)',
+      category: 'campbell',
+      labels: ['تست بازیابی شبکه', 'پایلوت آزمایشی', '۱ دقیقه‌ای'],
+      campbellVolumes: [1],
+      status: ExamStatus.Published,
+      startTime: new Date().toISOString(),
+      endTime: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      durationMinutes: 1,
+      totalQuestions: 5,
+      price: 0,
+      capacity: 1000,
+      isCapacityVisible: true,
+      officialEnrolledCount: 12,
+    },
   ];
 
   /**
@@ -189,9 +206,20 @@ export class ExamsService {
   }
 
   /**
-   * دریافت جزئیات یک آزمون با اسلاگ یکتا و محاسبه وضعیت ظرفیت
+   * دریافت جزئیات یک آزمون با اسلاگ یکتا و محاسبه وضعیت ظرفیت و ماشین وضعیت آزمون داوطلب
    */
-  async findBySlug(slug: string, userId?: string): Promise<ExamSummary & { isCapacityFull: boolean; remainingSeats?: number; isEnrolled?: boolean }> {
+  async findBySlug(
+    slug: string,
+    userId?: string,
+  ): Promise<
+    ExamSummary & {
+      isCapacityFull: boolean;
+      remainingSeats?: number;
+      isEnrolled?: boolean;
+      examState: 'UNENROLLED' | 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'GRADED';
+      attemptId?: string;
+    }
+  > {
     const baseExams = await this.getBaseExams();
     let exam = baseExams.find((e) => e.slug === slug || e.id === slug);
 
@@ -222,10 +250,57 @@ export class ExamsService {
     const remainingSeats = exam.capacity ? Math.max(0, exam.capacity - exam.officialEnrolledCount) : undefined;
 
     let isEnrolled = false;
+    let examState: 'UNENROLLED' | 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'GRADED' = 'UNENROLLED';
+    let attemptId: string | undefined = undefined;
+
     if (userId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
       const enrolledIds = await this.getUserEnrolledExamIds(userId);
       const enrolledSet = new Set(enrolledIds);
-      isEnrolled = enrolledSet.has(exam.id) || enrolledSet.has(exam.slug);
+      isEnrolled = enrolledSet.has(exam.id) || (exam.slug ? enrolledSet.has(exam.slug) : false);
+
+      if (isUuid) {
+        try {
+          const attempt = await this.prisma.client.attempt.findFirst({
+            where: {
+              userId,
+              OR: [{ examId: exam.id }, { exam: { slug: exam.slug } }],
+            },
+            orderBy: { startedAt: 'desc' },
+          });
+
+          if (attempt) {
+            attemptId = attempt.id;
+            isEnrolled = true;
+
+            if (attempt.status === 'not_started') {
+              examState = 'NOT_STARTED';
+            } else if (attempt.status === 'in_progress') {
+              const durationMinutes = exam.durationMinutes || 120;
+              const startedAtMs = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
+              const expiryMs = startedAtMs + durationMinutes * 60 * 1000;
+              const remainingSeconds = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+              if (remainingSeconds <= 0) {
+                examState = 'SUBMITTED';
+              } else {
+                examState = 'IN_PROGRESS';
+              }
+            } else if (attempt.status === 'submitted') {
+              if (attempt.scorePercentage !== null && attempt.scorePercentage !== undefined) {
+                examState = 'GRADED';
+              } else {
+                examState = 'SUBMITTED';
+              }
+            }
+          } else if (isEnrolled) {
+            examState = 'NOT_STARTED';
+          }
+        } catch {
+          if (isEnrolled) examState = 'NOT_STARTED';
+        }
+      } else if (isEnrolled) {
+        examState = 'NOT_STARTED';
+      }
     }
 
     return {
@@ -233,6 +308,8 @@ export class ExamsService {
       isCapacityFull,
       remainingSeats: exam.isCapacityVisible ? remainingSeats : undefined,
       isEnrolled,
+      examState,
+      attemptId,
     };
   }
 

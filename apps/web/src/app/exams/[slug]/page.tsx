@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ExamSummary, messagesFa } from '@condorlab/shared';
-import { BookOpen, Users, Flame, AlertCircle, CheckCircle2, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
+import { BookOpen, Users, Flame, AlertCircle, CheckCircle2, ArrowRight, ShieldCheck, Clock, Trophy } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 
 export default function ExamDetailPage() {
@@ -16,7 +16,12 @@ export default function ExamDetailPage() {
   const { isEnrolled } = useAuth();
 
   const [exam, setExam] = useState<
-    (ExamSummary & { isCapacityFull: boolean; remainingSeats?: number }) | null
+    (ExamSummary & {
+      isCapacityFull: boolean;
+      remainingSeats?: number;
+      examState?: 'UNENROLLED' | 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'GRADED';
+      attemptId?: string;
+    }) | null
   >(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -218,17 +223,49 @@ export default function ExamDetailPage() {
         <div className="space-y-6 animate-stagger-2">
           <div className="p-6 rounded-2xl bg-[#1A1A1A] border border-[#333333] shadow-2xl sticky top-6">
             {userHasEnrolled ? (
-              /* کارت صندلی فعال داوطلب */
+              /* کارت صندلی فعال داوطلب بر مبنای ماشین وضعیت صریح PRD */
               <div className="space-y-5">
-                <div className="p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-emerald-500/10 border border-green-500/30 text-right">
-                  <div className="flex items-center gap-2 text-green-400 font-black text-sm mb-1.5">
-                    <CheckCircle2 className="w-5 h-5" />
-                    <span>صندلی شما رزرو و آماده آزمون است</span>
+                {exam.examState === 'GRADED' ? (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-primary/20 to-amber-500/10 border border-primary/30 text-right">
+                    <div className="flex items-center gap-2 text-primary font-black text-sm mb-1.5">
+                      <Trophy className="w-5 h-5" />
+                      <span>کارنامه تحلیلی شما صادر گردید</span>
+                    </div>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      نتایج، درصدها و رتبه‌بندی کشوری این آزمون منتشر شده است و در داشبورد شما قابل مشاهده می‌باشد.
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-300 leading-relaxed">
-                    این آزمون در پنل کاربری شما ثبت گردیده است. به محض باز شدن پنجره آزمون، دکمه شروع آزمون فعال خواهد شد.
-                  </p>
-                </div>
+                ) : exam.examState === 'SUBMITTED' ? (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/10 border border-blue-500/30 text-right">
+                    <div className="flex items-center gap-2 text-cyan-400 font-black text-sm mb-1.5">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span>پاسخ‌برگ شما با موفقیت ثبت شد</span>
+                    </div>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      شما آزمون را به پایان رسانده‌اید. کارنامه رسمی و تحلیل ریزمهارتی ۳۰ دقیقه پس از پایان بازه آزمون صادر خواهد شد.
+                    </p>
+                  </div>
+                ) : exam.examState === 'IN_PROGRESS' ? (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-500/30 text-right">
+                    <div className="flex items-center gap-2 text-amber-400 font-black text-sm mb-1.5">
+                      <Clock className="w-5 h-5" />
+                      <span>آزمون شما هم‌اکنون در حال برگزاری است</span>
+                    </div>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      زمان آزمون در سرور در حال سپری شدن است. جهت ادامه پاسخ‌گویی به سؤالات، به اتاق آزمون بازگردید.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-emerald-500/10 border border-green-500/30 text-right">
+                    <div className="flex items-center gap-2 text-green-400 font-black text-sm mb-1.5">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span>صندلی شما رزرو و آماده آزمون است</span>
+                    </div>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      این آزمون در پنل کاربری شما ثبت گردیده است. برای ورود و پاسخ‌گویی، روی «شروع آزمون» کلیک کنید.
+                    </p>
+                  </div>
+                )}
 
                 <div className="p-4 rounded-xl bg-[#222] border border-[#333] space-y-2.5 text-xs text-gray-300">
                   <div className="flex items-center justify-between">
@@ -241,18 +278,52 @@ export default function ExamDetailPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-gray-400">تعداد سؤالات:</span>
-                    <span className="text-white font-mono">{exam.totalQuestions} سؤال ۴ گزینه‌ای</span>
+                    <span className="text-white font-mono">{exam.totalQuestions} سؤال</span>
                   </div>
                 </div>
 
-                <Button
-                  variant="primary"
-                  onClick={() => router.push(`/exam/${exam.slug}/room`)}
-                  className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/15 flex items-center justify-center gap-2"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  ورود به اتاق آزمون (شروع پاسخ‌گویی)
-                </Button>
+                <div className="flex flex-col gap-2.5">
+                  {exam.examState === 'GRADED' ? (
+                    <Link
+                      href="/student/dashboard"
+                      className="w-full text-sm font-bold min-h-[48px] rounded-xl bg-[#FFCC00] text-black hover:bg-[#FFD633] transition-colors flex items-center justify-center gap-2 shadow-lg shadow-[#FFCC00]/15"
+                    >
+                      <Trophy className="w-4 h-4" />
+                      مشاهده کارنامه
+                    </Link>
+                  ) : exam.examState === 'SUBMITTED' ? (
+                    <div className="w-full text-xs font-bold py-3 px-4 rounded-xl bg-white/5 border border-white/10 text-center text-gray-400 flex items-center justify-center gap-2">
+                      <Clock className="w-4 h-4 text-cyan-400" />
+                      <span>در انتظار صدور کارنامه (آزمون پایان یافته)</span>
+                    </div>
+                  ) : exam.examState === 'IN_PROGRESS' ? (
+                    <Button
+                      variant="primary"
+                      onClick={() => router.push(`/exam/${exam.slug}/room`)}
+                      className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/15 flex items-center justify-center gap-2"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      بازگشت به اتاق آزمون
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      onClick={() => router.push(`/exam/${exam.slug}/room`)}
+                      className="w-full text-sm font-bold min-h-[48px] shadow-lg shadow-[#FFCC00]/15 flex items-center justify-center gap-2"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      شروع آزمون
+                    </Button>
+                  )}
+
+                  <Link
+                    href={`/exams/${exam.slug}/leaderboard`}
+                    className="w-full text-xs font-bold py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 transition-colors border border-white/10 flex items-center justify-center gap-2"
+                  >
+                    <Trophy className="w-4 h-4 text-[#FFCC00]" />
+                    <span>مشاهده اسکوربورد و رتبه‌بندی رسمی</span>
+                  </Link>
+                </div>
               </div>
             ) : (
               <>

@@ -13,6 +13,7 @@ import {
   AccessType,
   formatPersianNumber,
   toEnglishDigits,
+  formatGrade,
 } from '@condorlab/shared';
 import {
   CreditCard,
@@ -32,7 +33,7 @@ function CheckoutContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const examId = searchParams.get('examId') || 'exm-campbell-p2';
-  const { isEnrolled, markExamAsEnrolled } = useAuth();
+  const { user: authUser, isEnrolled, markExamAsEnrolled } = useAuth();
   const [redirectingToDashboard, setRedirectingToDashboard] = useState(false);
 
   const [preview, setPreview] = useState<CheckoutPreview | null>(null);
@@ -56,8 +57,43 @@ function CheckoutContent() {
     accessType: string;
   } | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('condor_user');
+        return cached ? JSON.parse(cached) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+  const [isCheckingAuth, setIsCheckingAuth] = useState(false);
+
+  // همگام‌سازی لحظه‌ای با کانتکست احراز هویت
+  useEffect(() => {
+    if (authUser) {
+      setCurrentUser(authUser);
+      if (authUser.profile) {
+        setProfileData({
+          phoneNumber: authUser.profile.phoneNumber || '',
+          city: authUser.profile.city || '',
+          school: authUser.profile.school || '',
+          grade: authUser.profile.grade || '',
+        });
+        if (
+          authUser.profile.phoneNumber &&
+          authUser.profile.city &&
+          !/[a-zA-Z]/.test(authUser.profile.city) &&
+          authUser.profile.school &&
+          !/[a-zA-Z]/.test(authUser.profile.school) &&
+          authUser.profile.grade
+        ) {
+          setProfileSuccess(true);
+        }
+      }
+    }
+  }, [authUser]);
 
   // فرم تکمیل مشخصات
   const [profileData, setProfileData] = useState({
@@ -103,13 +139,13 @@ function CheckoutContent() {
                   setProfileSuccess(true);
                 }
               }
-            } else {
+            } else if (authRes.status === 401) {
               setCurrentUser(null);
               try {
                 localStorage.removeItem('condor_user');
               } catch {}
             }
-          } else {
+          } else if (authRes.status === 401) {
             setCurrentUser(null);
             try {
               localStorage.removeItem('condor_user');
@@ -642,7 +678,7 @@ function CheckoutContent() {
                       <span>•</span>
                       <span>
                         {profileData.grade || currentUser?.profile?.grade
-                          ? `پایه ${profileData.grade || currentUser?.profile?.grade}`
+                          ? formatGrade(profileData.grade || currentUser?.profile?.grade)
                           : 'پایه ثبت‌نشده'}
                       </span>
                     </div>

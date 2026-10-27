@@ -12,8 +12,9 @@ export const ACQUIRE_LUA = `
 -- ARGV[1] deviceId, [2] sessionId, [3] userId, [4] nowMs, [5] ttlSeconds, [6] takeoverLimit
 local lock = redis.call('HMGET', KEYS[1], 'deviceId', 'sessionId', 'userId', 'version', 'lastHeartbeatAt')
 if lock[1] then
-  if lock[1] == ARGV[1] then
-    redis.call('HSET', KEYS[1], 'lastHeartbeatAt', ARGV[4])
+  local isSameClient = (lock[1] == ARGV[1]) or (lock[2] == ARGV[2] and lock[3] == ARGV[3])
+  if isSameClient then
+    redis.call('HSET', KEYS[1], 'deviceId', ARGV[1], 'sessionId', ARGV[2], 'lastHeartbeatAt', ARGV[4])
     redis.call('EXPIRE', KEYS[1], ARGV[5])
     redis.call('HSET', KEYS[2], 'deviceId', ARGV[1], 'sessionId', ARGV[2], 'lastSeen', ARGV[4])
     redis.call('EXPIRE', KEYS[2], ARGV[5])
@@ -53,7 +54,8 @@ local lock = redis.call('HMGET', KEYS[1], 'deviceId', 'sessionId', 'userId', 've
 if not lock[1] then
   return {-1, 0, 0}
 end
-if lock[1] ~= ARGV[1] or lock[2] ~= ARGV[2] or lock[3] ~= ARGV[3] then
+local isOwner = (lock[1] == ARGV[1]) or (lock[2] == ARGV[2] and lock[3] == ARGV[3])
+if not isOwner then
   return {0, tonumber(lock[4]) or 1, 0}
 end
 
@@ -145,7 +147,8 @@ local lock = redis.call('HMGET', KEYS[1], 'deviceId', 'sessionId', 'userId', 've
 if not lock[1] then
   return {-1, 0}
 end
-if lock[1] ~= ARGV[1] or lock[2] ~= ARGV[2] or lock[3] ~= ARGV[3] then
+local isOwner = (lock[1] == ARGV[1]) or (lock[3] == ARGV[3] and (lock[2] == ARGV[2] or lock[1] == ARGV[1]))
+if not isOwner then
   return {0, tonumber(lock[4]) or 1}
 end
 return {1, tonumber(lock[4]) or 1}

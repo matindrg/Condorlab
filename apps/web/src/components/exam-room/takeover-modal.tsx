@@ -27,6 +27,11 @@ export function TakeoverModal({
   const isLockLost = info.code === 'EXAM_LOCK_LOST' || info.code === 'EXAM_LOCK_MISSING';
   const isLimitReached = info.remainingTakeovers <= 0;
 
+  const toFarsiDigits = (n: number | string) => {
+    const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    return String(n).replace(/[0-9]/g, (d) => farsiDigits[parseInt(d, 10)]);
+  };
+
   const handleTakeover = async () => {
     setIsTakingOver(true);
     setTakeoverError(null);
@@ -59,8 +64,8 @@ export function TakeoverModal({
                 ? 'آزمون در دستگاه دیگری فعال شد'
                 : 'نشست فعال دیگری با این حساب در آزمون است'}
             </h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              بر اساس قوانین مسابقات کندرلب، هر داوطلب در هر لحظه فقط مجاز به یک نشست فعال است.
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              آزمون شما در دستگاه دیگر همچنان در جریان است و با بازگشت، هیچ پاسخی حذف نخواهد شد. برای ادامه در این دستگاه، می‌توانید دستگاه قبلی را خارج کنید.
             </p>
           </div>
         </div>
@@ -79,7 +84,7 @@ export function TakeoverModal({
             <span>سهمیه جابه‌جایی دستگاه (Anti-Bounce):</span>
             <span className="font-bold text-foreground">
               {info.remainingTakeovers > 0
-                ? `${info.remainingTakeovers} بار از ۲ بار باقی مانده`
+                ? `${toFarsiDigits(info.remainingTakeovers)} بار از ۲ بار باقی‌مانده`
                 : '۰ بار (سقف تکمیل شده)'}
             </span>
           </div>
@@ -128,8 +133,8 @@ export function TakeoverModal({
             onClick={handleExit}
             className="flex items-center justify-center gap-1.5 py-3 px-4 text-xs font-semibold text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-xl transition-colors border border-border"
           >
-            <LogOut className="w-4 h-4" />
-            خروج از آزمون
+            <ArrowRight className="w-4 h-4" />
+            انصراف و بازگشت به پیشخوان
           </button>
         </div>
       </div>

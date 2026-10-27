@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckoutService } from '../checkout/checkout.service';
 import { AuthService } from '../auth/auth.service';
+import { ExamLockService } from '../exam-room/exam-lock.service';
 import { ExamStatus, ExamSummary } from '@condorlab/shared';
 
 const MOCK_CATALOG_EXAMS: ExamSummary[] = [
@@ -56,6 +57,23 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     isCapacityVisible: false,
     officialEnrolledCount: 42,
   },
+  {
+    id: 'exm-resilience-1m',
+    slug: 'offline-resilience-1min-test',
+    title: 'آزمون شبیه‌ساز تست پایداری شبکه و بازیابی (۱ دقیقه‌ای)',
+    category: 'campbell',
+    labels: ['تست بازیابی شبکه', 'پایلوت آزمایشی', '۱ دقیقه‌ای'],
+    campbellVolumes: [1],
+    status: ExamStatus.Published,
+    startTime: new Date().toISOString(),
+    endTime: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+    durationMinutes: 1,
+    totalQuestions: 5,
+    price: 0,
+    capacity: 1000,
+    isCapacityVisible: true,
+    officialEnrolledCount: 12,
+  },
 ];
 
 export interface PurchasedProductItem {
@@ -74,6 +92,14 @@ export interface PurchasedProductItem {
   campbellVolumes?: number[];
   startTime?: string;
   endTime?: string;
+  remainingSeconds?: number;
+  isLiveActive?: boolean;
+  startedAt?: string;
+  submittedAt?: string;
+  isSessionLocked?: boolean;
+  lockedDeviceId?: string;
+  lockedAt?: string;
+  lastHeartbeatAt?: string;
 }
 
 @Injectable()
@@ -81,6 +107,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly checkoutService: CheckoutService,
+    private readonly examLock: ExamLockService,
   ) {}
 
   private isUuid(val: string): boolean {
@@ -150,14 +177,21 @@ export class DashboardService {
           }),
         ]);
 
+        const processedExamIds = new Set<string>();
+
         for (const att of attempts) {
           const exam = att.exam;
           if (!exam) continue;
+          processedExamIds.add(exam.id);
+          processedExamIds.add(exam.slug);
 
           // تطبیق با ماک کاتالوگ برای متادیتاهای تکمیلی (در صورت نبود در جدول آزمون)
           const mockMatch = MOCK_CATALOG_EXAMS.find(
             (m) => m.slug === exam.slug || m.id === exam.id,
           );
+
+          // دریافت وضعیت قفل دستگاه فعال برای این نشست آزمون
+          const lockInfo = await this.examLock.getLockOwnerInfo(att.id);
 
           // یافتن تراکنش مالی و سفارش دقیق مرتبط با این آزمون
           const matchingLedger = ledgerEntries.find(
@@ -167,6 +201,43 @@ export class DashboardService {
             ? orders.find((o) => o.id === matchingLedger.orderId)
             : orders.find((o) => o.createdAt <= att.startedAt) || orders[0];
 
+          const durationMinutes = exam.durationMinutes || 120;
+          let remainingSeconds = durationMinutes * 60;
+          let finalStatus = att.status || 'not_started';
+          let isLiveActive = false;
+
+          if (att.status === 'not_started') {
+            finalStatus = 'not_started';
+            isLiveActive = false;
+            remainingSeconds = durationMinutes * 60;
+          } else if (att.status === 'in_progress') {
+            const startedAtMs = att.startedAt ? new Date(att.startedAt).getTime() : Date.now();
+            const expiryMs = startedAtMs + durationMinutes * 60 * 1000;
+            remainingSeconds = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+            if (remainingSeconds <= 0) {
+              finalStatus = 'submitted';
+              isLiveActive = false;
+              // ثبت خودکار انقضا در دیتابیس
+              this.prisma.client.attempt
+                .update({
+                  where: { id: att.id },
+                  data: { status: 'submitted', submittedAt: new Date(expiryMs) },
+                })
+                .catch(() => {});
+            } else {
+              finalStatus = 'in_progress';
+              isLiveActive = true;
+            }
+          } else if (att.status === 'submitted') {
+            remainingSeconds = 0;
+            isLiveActive = false;
+            if (att.scorePercentage !== null && att.scorePercentage !== undefined) {
+              finalStatus = 'graded';
+            } else {
+              finalStatus = 'submitted';
+            }
+          }
+
           purchasedProducts.push({
             id: att.id,
             title: exam.title,
@@ -175,10 +246,10 @@ export class DashboardService {
             orderNumber: matchingOrder?.orderNumber || `ORD-${att.id.slice(0, 8).toUpperCase()}`,
             price: exam.price,
             payableAmount: matchingOrder?.payableAmount ?? exam.price,
-            status: att.status || 'in_progress',
+            status: finalStatus,
             accessType: att.accessType === 'Open' ? 'آزاد' : 'رسمی (با رتبه)',
             purchasedAt: att.startedAt?.toISOString() || new Date().toISOString(),
-            durationMinutes: exam.durationMinutes,
+            durationMinutes,
             totalQuestions: mockMatch?.totalQuestions || 60,
             campbellVolumes:
               exam.campbellVolumes && exam.campbellVolumes.length > 0
@@ -186,7 +257,53 @@ export class DashboardService {
                 : (mockMatch?.campbellVolumes || [1, 2]),
             startTime: exam.startTime?.toISOString() || mockMatch?.startTime,
             endTime: exam.endTime?.toISOString() || mockMatch?.endTime,
+            remainingSeconds,
+            isLiveActive,
+            startedAt: att.startedAt?.toISOString(),
+            submittedAt: att.submittedAt?.toISOString(),
+            isSessionLocked: lockInfo.isLocked,
+            lockedDeviceId: lockInfo.lockedDeviceId,
+            lockedAt: lockInfo.lockedAt,
+            lastHeartbeatAt: lockInfo.lastHeartbeatAt,
           });
+        }
+
+        // نمایش سفارش‌های موفقی که هنوز ردیف Attempt برای آنها در دیتابیس واکشی نشده است (فقط با تطابق دقیق بدون ماک تصادفی)
+        for (const order of orders) {
+          if (order.status !== 'paid') continue;
+          const matchingLedger = ledgerEntries.find((l) => l.orderId === order.id);
+          const matchedMock = MOCK_CATALOG_EXAMS.find(
+            (m) =>
+              matchingLedger &&
+              (matchingLedger.description.includes(m.title) ||
+                matchingLedger.description.includes(m.slug)),
+          );
+
+          if (matchedMock && !processedExamIds.has(matchedMock.id) && !processedExamIds.has(matchedMock.slug)) {
+            processedExamIds.add(matchedMock.id);
+            processedExamIds.add(matchedMock.slug);
+
+            purchasedProducts.push({
+              id: `ord_${order.id}`,
+              title: matchedMock.title,
+              slug: matchedMock.slug,
+              type: matchedMock.category === 'stage2' ? 'شبیه‌ساز تخصصی مرحله ۲' : 'آزمون شبیه‌ساز',
+              orderNumber: order.orderNumber,
+              price: matchedMock.price,
+              payableAmount: order.payableAmount,
+              status: 'not_started',
+              accessType: 'رسمی (با رتبه)',
+              purchasedAt: order.createdAt.toISOString(),
+              durationMinutes: matchedMock.durationMinutes,
+              totalQuestions: matchedMock.totalQuestions,
+              campbellVolumes: matchedMock.campbellVolumes,
+              startTime: matchedMock.startTime,
+              endTime: matchedMock.endTime,
+              remainingSeconds: matchedMock.durationMinutes * 60,
+              isLiveActive: false,
+              isSessionLocked: false,
+            });
+          }
         }
       }
     } catch (e) {

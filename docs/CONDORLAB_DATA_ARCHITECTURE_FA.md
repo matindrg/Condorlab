@@ -99,7 +99,7 @@ CREATE TABLE profiles (
     first_name VARCHAR(64) NOT NULL,
     last_name VARCHAR(64) NOT NULL,
     phone_number VARCHAR(16) NULL, -- اختیاری در فاز A
-    grade VARCHAR(8) NOT NULL CHECK (grade IN ('7', '8', '9', '10', '11')), -- پایه ۱۲ مسدود است
+    grade VARCHAR(8) NOT NULL CHECK (grade IN ('7', '8', '9', '10', '11')), -- پایه دوازدهم مسدود است
     city VARCHAR(64) NOT NULL,
     school VARCHAR(128) NOT NULL,
     telegram_chat_id BIGINT UNIQUE NULL, -- شناسه چت تلگرام متصل به کاربر

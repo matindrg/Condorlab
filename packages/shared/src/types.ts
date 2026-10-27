@@ -1,4 +1,13 @@
-import { UserRole, UserStatus, StudentGrade, ExamStatus, AccessType, QuestionTopic, TicketStatus } from './enums';
+import {
+  UserRole,
+  UserStatus,
+  StudentGrade,
+  ExamStatus,
+  AccessType,
+  QuestionTopic,
+  TicketStatus,
+  QuestionType,
+} from './enums';
 
 export interface UserSummary {
   id: string;
@@ -33,6 +42,35 @@ export interface ExamSummary {
   isEnrolled?: boolean;
 }
 
+export interface StatementItem {
+  id: string;
+  label: string; // 'الف', 'ب', 'ج', 'د', 'هـ'
+  text: string;
+  correctValue?: boolean;
+}
+
+export interface QuestionData {
+  id: number | string;
+  questionNumber: number;
+  type: QuestionType | 'mcq4' | 'mcq5' | 'stage2_statements' | 'numeric';
+  stem: string;
+  options?: string[];
+  statements?: StatementItem[];
+  minRange?: number;
+  maxRange?: number;
+  correctOption?: number;
+  correctStatements?: Record<number, boolean>;
+  correctNumber?: number;
+  subject?: string;
+  topic?: string;
+  campbellVolume?: number;
+  campbellChapter?: number;
+  weight?: number;
+  negativePenalty?: number;
+  pdfPage?: number;
+  explanation?: string;
+}
+
 export interface QuestionMetadata {
   id: string;
   number: number;
@@ -40,15 +78,42 @@ export interface QuestionMetadata {
   campbellVolume: number;
   campbellChapter: number;
   scoreWeight: number;
-  negativePenalty: number; // e.g. 0.3333
+  negativePenalty: number;
   hasMultipleCorrect: boolean;
 }
 
 export interface OMRAnswerItem {
   questionNumber: number;
-  selectedOption: number | null; // 1, 2, 3, 4, or null
+  selectedOption?: number | null; // 1, 2, 3, 4, 5
+  selectedStatements?: Record<number, boolean | null> | null; // For stage 2 statements: { 1: true, 2: false, ... }
+  numericValue?: number | null; // For numeric questions
   isFlagged: boolean;
   answeredAt?: string;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  userId: string;
+  displayName: string;
+  isCurrentUser: boolean;
+  grade: string; // Persian ordinal e.g. "پایه دهم"
+  city: string;
+  school: string;
+  rawScore: number;
+  maxScore: number;
+  percentage: number;
+  submittedAt: string;
+}
+
+export interface LeaderboardResponse {
+  examId: string;
+  examSlug: string;
+  examTitle: string;
+  totalOfficialParticipants: number;
+  keyVersionNumber: number;
+  entries: LeaderboardEntry[];
+  currentUserEntry?: LeaderboardEntry | null;
+  generatedAt: string;
 }
 
 export interface ExamAttemptState {

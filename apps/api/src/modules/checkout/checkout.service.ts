@@ -62,6 +62,23 @@ const MOCK_CATALOG_EXAMS: ExamSummary[] = [
     isCapacityVisible: false,
     officialEnrolledCount: 42,
   },
+  {
+    id: 'exm-resilience-1m',
+    slug: 'offline-resilience-1min-test',
+    title: 'آزمون شبیه‌ساز تست پایداری شبکه و بازیابی (۱ دقیقه‌ای)',
+    category: 'campbell',
+    labels: ['تست بازیابی شبکه', 'پایلوت آزمایشی', '۱ دقیقه‌ای'],
+    campbellVolumes: [1],
+    status: ExamStatus.Published,
+    startTime: new Date().toISOString(),
+    endTime: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+    durationMinutes: 1,
+    totalQuestions: 5,
+    price: 0,
+    capacity: 1000,
+    isCapacityVisible: true,
+    officialEnrolledCount: 12,
+  },
 ];
 
 @Injectable()
@@ -593,7 +610,7 @@ export class CheckoutService {
             examId: dbExam.id,
             userId: dbUser.id,
             accessType: preview.accessType === 'Open' ? AccessType.Open : AccessType.Official,
-            status: 'in_progress',
+            status: 'not_started',
           },
         });
 

@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { parseSessionToken } from '../../common/utils/session.util';
 
 @Controller('auth')
 export class AuthController {
@@ -31,10 +32,17 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any, @Res({ passthrough: true }) res: Response) {
-    await this.authService.logout(user.id, user.sessionId);
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    try {
+      const rawCookie = req.cookies?.['condor_session'] || req.headers.authorization;
+      const parsed = parseSessionToken(rawCookie);
+      if (parsed) {
+        await this.authService.logout(parsed.userId, parsed.sessionId);
+      }
+    } catch {
+      // ignore
+    }
     res.clearCookie('condor_session', {
       path: '/',
       httpOnly: true,

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { Search, X, BookOpen, ExternalLink, ArrowRight, CornerDownLeft } from 'lucide-react';
 import { ExamSummary, formatToman, toPersianDigits } from '@condorlab/shared';
 
@@ -29,6 +29,7 @@ const STATIC_NAV_ITEMS: SearchItem[] = [
 
 export function GlobalSearchDialog() {
   const router = useRouter();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -67,9 +68,12 @@ export function GlobalSearchDialog() {
       });
   }, []);
 
-  // هندلر شورتکات کیبورد Cmd+K و Ctrl+K
+  // هندلر شورتکات کیبورد Cmd+K و Ctrl+K (غیرفعال در اتاق آزمون جهت جلوگیری از حواس‌پرتی داوطلب)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (pathname && (pathname.endsWith('/room') || pathname.includes('/room/'))) {
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setIsOpen((prev) => !prev);
@@ -81,7 +85,7 @@ export function GlobalSearchDialog() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, pathname]);
 
   // رویداد باز شدن از طریق دکمه یا بقیه بخش‌های برنامه
   useEffect(() => {
@@ -168,7 +172,8 @@ export function GlobalSearchDialog() {
     }
   }, [selectedIndex]);
 
-  if (!isOpen) return null;
+  const isExamRoom = Boolean(pathname && (pathname.endsWith('/room') || pathname.includes('/room/')));
+  if (!isOpen || isExamRoom) return null;
 
   return (
     <div

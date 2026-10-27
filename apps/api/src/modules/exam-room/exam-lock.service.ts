@@ -18,6 +18,8 @@ export interface LockContext {
 export interface StoredAnswer {
   questionNumber: number;
   selectedOption: number | null;
+  selectedStatements?: Record<number, boolean | null> | null;
+  numericValue?: number | null;
   isFlagged?: boolean;
   answeredAt?: number;
 }
@@ -98,11 +100,25 @@ export class ExamLockService {
   }
 
   /**
+   * همگام‌سازی تعداد سوییچ از دیتابیس پایدار
+   */
+  syncTakeoverCount(attemptId: string, count: number) {
+    if (count > 0) {
+      const current = ExamLockService.inMemoryTakeovers.get(attemptId) || 0;
+      if (count > current) {
+        ExamLockService.inMemoryTakeovers.set(attemptId, count);
+      }
+    }
+  }
+
+  /**
    * دریافت یا تثبیت قفل اولیه ورود به آزمون
    */
   async acquire(ctx: LockContext): Promise<{
     status: 'acquired' | 'already_locked';
     version: number;
+    takeoverCount: number;
+    remainingTakeovers: number;
     expiresAt: string;
     serverTime: string;
     heartbeatIntervalMs: number;
@@ -127,9 +143,14 @@ export class ExamLockService {
         );
 
         if (code === 1 || code === 2) {
+          const rawCount = await client.get(this.takeoverCountKey(ctx.attemptId));
+          const count = Number(rawCount || 0);
+          const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - count);
           return {
             status: code === 1 ? 'acquired' : 'already_locked',
             version: Number(version || 1),
+            takeoverCount: count,
+            remainingTakeovers,
             expiresAt,
             serverTime: new Date(now).toISOString(),
             heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
@@ -171,21 +192,29 @@ export class ExamLockService {
     // منطق فال‌بک در حافظه
     const existing = ExamLockService.inMemoryLocks.get(ctx.attemptId);
     const takeovers = ExamLockService.inMemoryTakeovers.get(ctx.attemptId) || 0;
+    const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - takeovers);
 
     if (existing && existing.expiresAt > now) {
-      if (existing.deviceId === ctx.deviceId && existing.sessionId === ctx.sessionId) {
+      const isSameClient =
+        existing.deviceId === ctx.deviceId ||
+        (existing.userId === ctx.userId && existing.sessionId === ctx.sessionId);
+
+      if (isSameClient) {
+        existing.deviceId = ctx.deviceId;
+        existing.sessionId = ctx.sessionId;
         existing.lastHeartbeatAt = now;
         existing.expiresAt = now + LOCK_TTL_SECONDS * 1000;
         return {
           status: 'already_locked',
           version: existing.version,
+          takeoverCount: takeovers,
+          remainingTakeovers,
           expiresAt: new Date(existing.expiresAt).toISOString(),
           serverTime: new Date(now).toISOString(),
           heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
         };
       }
 
-      const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - takeovers);
       throw new ConflictException({
         statusCode: 409,
         code: 'EXAM_LOCKED',
@@ -221,6 +250,8 @@ export class ExamLockService {
     return {
       status: 'acquired',
       version: 1,
+      takeoverCount: takeovers,
+      remainingTakeovers,
       expiresAt,
       serverTime: new Date(now).toISOString(),
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
@@ -341,26 +372,50 @@ export class ExamLockService {
     }
 
     // منطق فال‌بک در حافظه
-    const lock = ExamLockService.inMemoryLocks.get(ctx.attemptId);
+    let lock = ExamLockService.inMemoryLocks.get(ctx.attemptId);
     const takeovers = ExamLockService.inMemoryTakeovers.get(ctx.attemptId) || 0;
     const remainingTakeovers = Math.max(0, TAKEOVER_LIMIT - takeovers);
 
     if (!lock || lock.expiresAt <= now) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'EXAM_LOCK_MISSING',
-        message: 'قفل آزمون به دلیل عدم ارسال ضربان منقضی شده است.',
-        details: { canTakeover: remainingTakeovers > 0, remainingTakeovers },
-      });
+      const isSameOwner =
+        !lock ||
+        lock.deviceId === ctx.deviceId ||
+        (lock.userId === ctx.userId && lock.sessionId === ctx.sessionId);
+
+      if (isSameOwner) {
+        // تمدید و همگام‌سازی خودکار قفل برای همان کاربر پس از قطعی موقت شبکه یا انقضای موقت
+        const currentVersion = lock?.version || 1;
+        lock = {
+          deviceId: ctx.deviceId,
+          sessionId: ctx.sessionId,
+          userId: ctx.userId,
+          version: currentVersion,
+          lastHeartbeatAt: now,
+          expiresAt: now + LOCK_TTL_SECONDS * 1000,
+        };
+        ExamLockService.inMemoryLocks.set(ctx.attemptId, lock);
+      } else {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'EXAM_LOCK_MISSING',
+          message: 'قفل آزمون به دلیل عدم ارسال ضربان منقضی شده است.',
+          details: { canTakeover: remainingTakeovers > 0, remainingTakeovers },
+        });
+      }
     }
 
-    if (lock.deviceId !== ctx.deviceId || lock.sessionId !== ctx.sessionId) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'EXAM_LOCK_LOST',
-        message: 'آزمون در دستگاه دیگری فعال شده است و دسترسی این دستگاه معلق شد.',
-        details: { canTakeover: remainingTakeovers > 0, remainingTakeovers },
-      });
+    if (lock.deviceId !== ctx.deviceId) {
+      if (lock.userId === ctx.userId && lock.sessionId === ctx.sessionId) {
+        // همان سشن در حال ارسال با شناسه است
+        lock.deviceId = ctx.deviceId;
+      } else {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'EXAM_LOCK_LOST',
+          message: 'آزمون در دستگاه دیگری فعال شده است و دسترسی این دستگاه معلق شد.',
+          details: { canTakeover: remainingTakeovers > 0, remainingTakeovers },
+        });
+      }
     }
 
     lock.lastHeartbeatAt = now;
@@ -481,10 +536,11 @@ export class ExamLockService {
       };
     }
 
-    // ۲. اگر همان دستگاه و نشست است: بدون تغییر و بدون کسر سهمیه
-    if (existing.deviceId === ctx.deviceId && existing.sessionId === ctx.sessionId) {
+    // ۲. اگر همان دستگاه است: بدون تغییر و بدون کسر سهمیه
+    if (existing.deviceId === ctx.deviceId) {
       existing.lastHeartbeatAt = now;
       existing.expiresAt = now + LOCK_TTL_SECONDS * 1000;
+      existing.sessionId = ctx.sessionId;
       return {
         status: 'already_owner',
         version: existing.version,
@@ -559,7 +615,9 @@ export class ExamLockService {
           };
         }
 
-        const isOwner = lockData.deviceId === ctx.deviceId && lockData.sessionId === ctx.sessionId;
+        const isOwner =
+          lockData.deviceId === ctx.deviceId ||
+          (lockData.userId === ctx.userId && lockData.sessionId === ctx.sessionId);
         return {
           locked: true,
           isOwner,
@@ -592,7 +650,9 @@ export class ExamLockService {
       };
     }
 
-    const isOwner = lock.deviceId === ctx.deviceId && lock.sessionId === ctx.sessionId;
+    const isOwner =
+      lock.deviceId === ctx.deviceId ||
+      (lock.userId === ctx.userId && lock.sessionId === ctx.sessionId);
     return {
       locked: true,
       isOwner,
@@ -626,15 +686,12 @@ export class ExamLockService {
           throw new ForbiddenException({
             statusCode: 403,
             code: 'EXAM_LOCK_LOST',
-            message: 'شما مالک فعال این نشست نیستید.',
+            message: 'شما مالک فعال این نشست نیستید و آزمون روی دستگاه دیگری قفل شده است.',
           });
         }
         if (code === -1) {
-          throw new ForbiddenException({
-            statusCode: 403,
-            code: 'EXAM_LOCK_MISSING',
-            message: 'قفل نشست منقضی شده است.',
-          });
+          // قفل نشست منقضی شده اما دستگاه دیگری مالکیت را نگرفته است؛ ارسال پاسخ‌برگ برای صاحب آزمون بلامانع است
+          return 1;
         }
       } catch (err) {
         if (err instanceof ForbiddenException) throw err;
@@ -642,15 +699,92 @@ export class ExamLockService {
     }
 
     const lock = ExamLockService.inMemoryLocks.get(ctx.attemptId);
-    if (!lock || lock.deviceId !== ctx.deviceId || lock.sessionId !== ctx.sessionId) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'EXAM_LOCK_LOST',
-        message: 'شما مالک فعال این نشست نیستید.',
-      });
+    if (lock && lock.expiresAt > Date.now()) {
+      const isOwner =
+        lock.deviceId === ctx.deviceId ||
+        (lock.userId === ctx.userId && (lock.sessionId === ctx.sessionId || lock.deviceId === ctx.deviceId));
+
+      if (!isOwner) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'EXAM_LOCK_LOST',
+          message: 'شما مالک فعال این نشست نیستید و آزمون روی دستگاه دیگری قفل شده است.',
+        });
+      }
+
+      return lock.version;
     }
 
-    return lock.version;
+    // اگر قفل منقضی شده یا حذف شده باشد، ولی دستگاه متخاصم دیگری وجود نداشته باشد، به صاحب آزمون اجازه اتمام داده می‌شود
+    return 1;
+  }
+
+  // ثبت سابقه آخرین دستگاه متصل برای نمایش در داشبورد حتی پس از انقضا یا اتمام آزمون
+  private static lastKnownLockOwners = new Map<
+    string,
+    { lockedDeviceId: string; lockedAt?: string; lastHeartbeatAt?: string }
+  >();
+
+  /**
+   * دریافت مشخصات دستگاه فعال دارای قفل برای نمایش در داشبورد
+   */
+  async getLockOwnerInfo(attemptId: string): Promise<{
+    isLocked: boolean;
+    lockedDeviceId?: string;
+    lockedAt?: string;
+    lastHeartbeatAt?: string;
+  }> {
+    const now = Date.now();
+    const client = this.redis.getClient();
+
+    if (client && client.status === 'ready') {
+      try {
+        const lockData = await client.hgetall(this.lockKey(attemptId));
+        if (lockData && lockData.deviceId) {
+          ExamLockService.lastKnownLockOwners.set(attemptId, {
+            lockedDeviceId: lockData.deviceId,
+            lockedAt: lockData.acquiredAt ? new Date(Number(lockData.acquiredAt)).toISOString() : undefined,
+            lastHeartbeatAt: lockData.lastHeartbeatAt ? new Date(Number(lockData.lastHeartbeatAt)).toISOString() : undefined,
+          });
+          return {
+            isLocked: true,
+            lockedDeviceId: lockData.deviceId,
+            lockedAt: lockData.acquiredAt ? new Date(Number(lockData.acquiredAt)).toISOString() : undefined,
+            lastHeartbeatAt: lockData.lastHeartbeatAt ? new Date(Number(lockData.lastHeartbeatAt)).toISOString() : undefined,
+          };
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    const lock = ExamLockService.inMemoryLocks.get(attemptId);
+    if (lock && lock.expiresAt > now) {
+      ExamLockService.lastKnownLockOwners.set(attemptId, {
+        lockedDeviceId: lock.deviceId,
+        lockedAt: new Date(lock.lastHeartbeatAt).toISOString(),
+        lastHeartbeatAt: new Date(lock.lastHeartbeatAt).toISOString(),
+      });
+      return {
+        isLocked: true,
+        lockedDeviceId: lock.deviceId,
+        lockedAt: new Date(lock.lastHeartbeatAt).toISOString(),
+        lastHeartbeatAt: new Date(lock.lastHeartbeatAt).toISOString(),
+      };
+    }
+
+    // نمایش آخرین دستگاه متصل شناخته‌شده برای پایش بهتر کاربر
+    const lastKnown = ExamLockService.lastKnownLockOwners.get(attemptId);
+    if (lastKnown) {
+      return {
+        isLocked: false,
+        lockedDeviceId: lastKnown.lockedDeviceId,
+        lockedAt: lastKnown.lockedAt,
+        lastHeartbeatAt: lastKnown.lastHeartbeatAt,
+      };
+    }
+
+    return { isLocked: false };
   }
 
   /**
@@ -662,11 +796,27 @@ export class ExamLockService {
 
     if (client && client.status === 'ready') {
       try {
+        const lockData = await client.hgetall(this.lockKey(attemptId));
+        if (lockData?.deviceId) {
+          ExamLockService.lastKnownLockOwners.set(attemptId, {
+            lockedDeviceId: lockData.deviceId,
+            lockedAt: lockData.acquiredAt ? new Date(Number(lockData.acquiredAt)).toISOString() : undefined,
+            lastHeartbeatAt: lockData.lastHeartbeatAt ? new Date(Number(lockData.lastHeartbeatAt)).toISOString() : undefined,
+          });
+        }
         await client.del(this.lockKey(attemptId));
         await client.del(this.heartbeatKey(attemptId));
       } catch {
         // ignore
       }
+    }
+    const memLock = ExamLockService.inMemoryLocks.get(attemptId);
+    if (memLock) {
+      ExamLockService.lastKnownLockOwners.set(attemptId, {
+        lockedDeviceId: memLock.deviceId,
+        lockedAt: new Date(memLock.lastHeartbeatAt).toISOString(),
+        lastHeartbeatAt: new Date(memLock.lastHeartbeatAt).toISOString(),
+      });
     }
     ExamLockService.inMemoryLocks.delete(attemptId);
   }

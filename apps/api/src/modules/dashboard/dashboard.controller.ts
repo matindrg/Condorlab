@@ -11,21 +11,17 @@ import {
 } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import type { Request } from 'express';
+import { parseSessionToken } from '../../common/utils/session.util';
 
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   private extractUserId(req: Request): string {
-    const rawSession =
-      req.cookies?.condor_session || req.headers.authorization?.replace('Bearer ', '');
-    if (rawSession) {
-      try {
-        const [userId] = Buffer.from(rawSession, 'base64').toString('utf-8').split(':');
-        if (userId) return userId;
-      } catch {
-        // سشن نامعتبر
-      }
+    const rawSession = req.cookies?.condor_session || req.headers.authorization;
+    const parsed = parseSessionToken(rawSession);
+    if (parsed) {
+      return parsed.userId;
     }
     return (req.headers['x-client-session-id'] as string) || 'demo-student-session';
   }

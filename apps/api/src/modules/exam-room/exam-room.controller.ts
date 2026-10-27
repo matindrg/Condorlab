@@ -8,7 +8,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Sse,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ExamRoomService } from './exam-room.service';
@@ -40,15 +42,28 @@ interface SubmitBody {
 export class ExamRoomController {
   constructor(private readonly examRoomService: ExamRoomService) {}
 
+  private resolveDeviceId(user: any, bodyDeviceId?: string, headerDeviceId?: string): string {
+    const raw = (bodyDeviceId || headerDeviceId || '').trim();
+    if (raw && raw !== 'undefined' && raw !== 'null') {
+      return raw;
+    }
+    // شناسه پایدار قطعی بر اساس سشن یا کاربر (هرگز تصادفی با زمان تولید نشود)
+    if (user?.sessionId) {
+      return `dev_sess_${String(user.sessionId).slice(0, 12)}`;
+    }
+    if (user?.id) {
+      return `dev_user_${String(user.id).slice(0, 12)}`;
+    }
+    return 'dev_default_client';
+  }
+
   @Get(':identifier/init')
   async initRoom(
     @Param('identifier') identifier: string,
     @CurrentUser() user: any,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId =
-      headerDeviceId ||
-      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    const deviceId = this.resolveDeviceId(user, undefined, headerDeviceId);
     return this.examRoomService.initRoom(identifier, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
@@ -58,25 +73,25 @@ export class ExamRoomController {
     @CurrentUser() user: any,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId =
-      headerDeviceId ||
-      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    const deviceId = this.resolveDeviceId(user, undefined, headerDeviceId);
     return this.examRoomService.getLockState(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
-  @Post(':attemptId/start')
+  @Sse(':attemptId/events')
+  events(@Param('attemptId') attemptId: string) {
+    return this.examRoomService.getLockEvents(attemptId);
+  }
+
+  @Post(':identifier/start')
   @HttpCode(HttpStatus.OK)
   async startExam(
-    @Param('attemptId') attemptId: string,
+    @Param('identifier') identifier: string,
     @CurrentUser() user: any,
     @Headers('x-device-id') headerDeviceId?: string,
     @Body('deviceId') bodyDeviceId?: string,
   ) {
-    const deviceId =
-      bodyDeviceId ||
-      headerDeviceId ||
-      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
-    return this.examRoomService.startExam(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
+    const deviceId = this.resolveDeviceId(user, bodyDeviceId, headerDeviceId);
+    return this.examRoomService.startExam(identifier, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 
   @Post(':attemptId/heartbeat')
@@ -87,10 +102,7 @@ export class ExamRoomController {
     @Body() body: HeartbeatBody,
     @Headers('x-device-id') headerDeviceId?: string,
   ) {
-    const deviceId =
-      body?.deviceId ||
-      headerDeviceId ||
-      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    const deviceId = this.resolveDeviceId(user, body?.deviceId, headerDeviceId);
     return this.examRoomService.heartbeat(
       attemptId,
       user?.id || 'demo_user',
@@ -109,10 +121,7 @@ export class ExamRoomController {
     @Headers('x-device-id') headerDeviceId?: string,
     @Body('deviceId') bodyDeviceId?: string,
   ) {
-    const deviceId =
-      bodyDeviceId ||
-      headerDeviceId ||
-      (user?.sessionId ? `dev_${String(user.sessionId).slice(0, 8)}` : `dev_guest_${Date.now().toString(36)}`);
+    const deviceId = this.resolveDeviceId(user, bodyDeviceId, headerDeviceId);
     return this.examRoomService.takeover(attemptId, user?.id || 'demo_user', user?.sessionId || 'sess_demo', deviceId);
   }
 

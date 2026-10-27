@@ -16,6 +16,7 @@ import {
 import { LogoutDialog } from '@/components/logout-dialog';
 import { toast } from '@/components/ui/toast';
 import { formatGrade } from '@condorlab/shared';
+import { useAuth } from '@/context/auth-context';
 
 export interface AuthUser {
   id: string;
@@ -33,11 +34,10 @@ export interface AuthUser {
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, isLoading, logout } = useAuth();
 
   const [mounted, setMounted] = useState(false);
   const [isMac, setIsMac] = useState(false);
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
@@ -47,75 +47,13 @@ export function Navbar() {
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const mobileToggleRef = useRef<HTMLDivElement>(null);
 
-  // پس از ماونت شدن کلاینت، وضعیت کش محلی را بخوانیم
   useEffect(() => {
     setMounted(true);
     if (typeof window !== 'undefined') {
       const platform = (window.navigator as any)?.userAgentData?.platform || window.navigator.platform || window.navigator.userAgent || '';
       setIsMac(/mac/i.test(platform));
     }
-    try {
-      const cached = localStorage.getItem('condor_user');
-      if (cached) {
-        setUser(JSON.parse(cached));
-      }
-    } catch {
-      // ignore
-    }
   }, []);
-
-  // بررسی وضعیت احراز هویت با بک‌اند و همگام‌سازی کش
-  const checkAuth = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/me', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.user) {
-          setUser(data.user);
-          try {
-            localStorage.setItem('condor_user', JSON.stringify(data.user));
-          } catch {}
-          return;
-        }
-      }
-
-      // اگر سرور صراحتاً ۴۰۱ داد و کاربر معتبری وجود نداشت
-      if (res.status === 401) {
-        // اگر لوکال استوریج قبلی منقضی شده بود
-        setUser(null);
-        try {
-          localStorage.removeItem('condor_user');
-        } catch {}
-      }
-    } catch {
-      // در صورت خطای شبکه، دیتای کش‌شده در استیت حفظ می‌شود
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    checkAuth();
-
-    // شنود رویداد تغییر وضعیت لاگین در کل اپلیکیشن (صفحه لاگین، ثبت‌نام، تسویه‌حساب)
-    const handleAuthChange = () => {
-      try {
-        const cached = localStorage.getItem('condor_user');
-        setUser(cached ? JSON.parse(cached) : null);
-      } catch {
-        setUser(null);
-      }
-      setIsLoading(false);
-    };
-
-    window.addEventListener('condor_auth_change', handleAuthChange);
-    window.addEventListener('storage', handleAuthChange);
-
-    return () => {
-      window.removeEventListener('condor_auth_change', handleAuthChange);
-      window.removeEventListener('storage', handleAuthChange);
-    };
-  }, [pathname, checkAuth]);
 
   // بستن خودکار منوها هنگام تغییر مسیر (Navigation)
   useEffect(() => {
@@ -167,18 +105,11 @@ export function Navbar() {
   const handleLogoutConfirmed = async () => {
     setIsLoggingOut(true);
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await logout();
     } catch (err) {
       console.error('Logout error:', err);
     }
 
-    try {
-      localStorage.removeItem('condor_user');
-      localStorage.removeItem('condor_enrolled_exams');
-    } catch {}
-
-    window.dispatchEvent(new Event('condor_auth_change'));
-    setUser(null);
     setIsLogoutDialogOpen(false);
     setIsLoggingOut(false);
     setIsDropdownOpen(false);
@@ -197,11 +128,18 @@ export function Navbar() {
   const navLinks = [
     { href: '/', label: 'خانه' },
     { href: '/exams', label: 'کاتالوگ آزمون‌ها' },
-    ...(user ? [{ href: '/student/dashboard', label: 'داشبورد من' }] : []),
+    { href: '/leaderboard', label: 'لیدربورد کشوری' },
+    ...(mounted && user ? [{ href: '/student/dashboard', label: 'داشبورد من' }] : []),
   ];
 
-  // عدم نمایش هدر در صفحات اختصاصی ورود و ثبت‌نام
-  if (pathname === '/login' || pathname === '/signup' || pathname?.startsWith('/auth')) {
+  // عدم نمایش هدر سایت در صفحات ورود، ثبت‌نام و اتاق اختصاصی آزمون (جهت تمرکز کامل داوطلب و جلوگیری از تداخل ناوبری)
+  const isExamRoom = Boolean(pathname && (pathname.endsWith('/room') || pathname.includes('/room/')));
+  if (
+    pathname === '/login' ||
+    pathname === '/signup' ||
+    pathname?.startsWith('/auth') ||
+    isExamRoom
+  ) {
     return null;
   }
 

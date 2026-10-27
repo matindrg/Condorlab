@@ -69,6 +69,23 @@ export const INITIAL_CATALOG_EXAMS: ExamSummary[] = [
     isCapacityVisible: true,
     officialEnrolledCount: 2,
   },
+  {
+    id: 'exm-resilience-1m',
+    slug: 'offline-resilience-1min-test',
+    title: 'آزمون شبیه‌ساز تست پایداری شبکه و بازیابی (۱ دقیقه‌ای)',
+    category: 'campbell',
+    labels: ['تست بازیابی شبکه', 'پایلوت آزمایشی', '۱ دقیقه‌ای'],
+    campbellVolumes: [1],
+    status: ExamStatus.Published,
+    startTime: '2026-10-26T12:00:00.000Z',
+    endTime: '2026-11-26T20:00:00.000Z',
+    durationMinutes: 1,
+    totalQuestions: 5,
+    price: 0,
+    capacity: 1000,
+    isCapacityVisible: true,
+    officialEnrolledCount: 12,
+  },
 ];
 
 export function getInitialExam(idOrSlug: string): ExamSummary {

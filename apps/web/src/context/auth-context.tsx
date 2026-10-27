@@ -10,6 +10,7 @@ interface AuthContextType {
   isEnrolled: (examIdOrSlug: string) => boolean;
   markExamAsEnrolled: (examIdOrSlug: string) => void;
   refreshAuth: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -19,31 +20,47 @@ const AuthContext = createContext<AuthContextType>({
   isEnrolled: () => false,
   markExamAsEnrolled: () => {},
   refreshAuth: async () => {},
+  logout: async () => {},
 });
 
 const STORAGE_USER_KEY = 'condor_user';
 const STORAGE_ENROLLED_KEY = 'condor_enrolled_exams';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
-  const [enrolledExamIds, setEnrolledExamIds] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // لود اولیه از کش محلی
-  useEffect(() => {
-    try {
-      const cachedUser = localStorage.getItem(STORAGE_USER_KEY);
-      if (cachedUser) {
-        setUser(JSON.parse(cachedUser));
+  const [user, setUser] = useState<any | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(STORAGE_USER_KEY);
+        return cached ? JSON.parse(cached) : null;
+      } catch {
+        return null;
       }
-      const cachedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY);
-      if (cachedEnrolled) {
-        setEnrolledExamIds(JSON.parse(cachedEnrolled));
-      }
-    } catch {
-      // ignore
     }
-  }, []);
+    return null;
+  });
+
+  const [enrolledExamIds, setEnrolledExamIds] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(STORAGE_ENROLLED_KEY);
+        return cached ? JSON.parse(cached) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return !localStorage.getItem(STORAGE_USER_KEY);
+      } catch {
+        return true;
+      }
+    }
+    return true;
+  });
 
   const refreshAuth = useCallback(async () => {
     try {
@@ -79,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch {
-      // خطا در شبکه
+      // در صورت خطای شبکه یا بازراه‌اندازی سرور، کش کاربر پاک نمی‌شود
     } finally {
       setIsLoading(false);
     }
@@ -91,13 +108,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleAuthChange = () => {
       try {
         const cachedUser = localStorage.getItem(STORAGE_USER_KEY);
-        setUser(cachedUser ? JSON.parse(cachedUser) : null);
+        if (!cachedUser) {
+          // در صورت خروج از حساب، از واکشی مجدد خودداری می‌شود تا وضعیت لاگ‌اوت لغو نشود
+          setUser(null);
+          setEnrolledExamIds([]);
+          return;
+        }
+        setUser(JSON.parse(cachedUser));
         const cachedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY);
         if (cachedEnrolled) {
           setEnrolledExamIds(JSON.parse(cachedEnrolled));
         }
+        refreshAuth();
       } catch {}
-      refreshAuth();
     };
 
     window.addEventListener('condor_auth_change', handleAuthChange);
@@ -124,6 +147,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [enrolledExamIds],
   );
 
+  const logout = useCallback(async () => {
+    setUser(null);
+    setEnrolledExamIds([]);
+    try {
+      localStorage.removeItem(STORAGE_USER_KEY);
+      localStorage.removeItem(STORAGE_ENROLLED_KEY);
+      localStorage.removeItem('condor_active_exam');
+    } catch {}
+
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' });
+    } catch {
+      // ignore
+    }
+    window.dispatchEvent(new Event('condor_auth_change'));
+    window.dispatchEvent(new Event('condor_active_exam_change'));
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -133,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isEnrolled,
         markExamAsEnrolled,
         refreshAuth,
+        logout,
       }}
     >
       {children}

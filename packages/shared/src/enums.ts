@@ -61,3 +61,10 @@ export enum TicketStatus {
   Pending = 'pending',
   Closed = 'closed',
 }
+
+export enum QuestionType {
+  MCQ4 = 'mcq4',
+  MCQ5 = 'mcq5',
+  Stage2Statements = 'stage2_statements',
+  Numeric = 'numeric',
+}

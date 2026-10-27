@@ -4,7 +4,10 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
+  MessageEvent,
 } from '@nestjs/common';
+import { Subject, Observable } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   ExamLockService,
@@ -13,15 +16,30 @@ import {
   TelemetryEvent,
   LockState,
 } from './exam-lock.service';
-import { CAMPBELL_PILOT_QUESTIONS } from './exam-questions.mock';
+import { CAMPBELL_PILOT_QUESTIONS, getQuestionsForExam } from './exam-questions.mock';
 import { ExamStatus } from '@condorlab/shared';
 
 @Injectable()
 export class ExamRoomService {
+  private lockEvents$ = new Subject<{
+    attemptId: string;
+    type: string;
+    previousDeviceId?: string;
+    newDeviceId?: string;
+    version?: number;
+  }>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly examLock: ExamLockService,
   ) {}
+
+  getLockEvents(attemptId: string): Observable<MessageEvent> {
+    return this.lockEvents$.pipe(
+      filter((ev) => ev.attemptId === attemptId),
+      map((ev) => ({ data: ev } as unknown as MessageEvent)),
+    );
+  }
 
   /**
    * بارگذاری اطلاعات آزمون، پاسخ‌برگ، سوالات و احراز صندلی شرکت در آزمون
@@ -30,31 +48,82 @@ export class ExamRoomService {
     const dbExam = await this.resolveExam(identifier);
     const dbUser = await this.resolveUser(userId);
 
-    // واکشی یا ایجاد ردیف شرکت (Attempt)
+    // واکشی یا ایجاد ردیف شرکت (Attempt) — اولویت با آخرین تلاش در حال برگزاری
     let attempt = await this.prisma.client.attempt.findFirst({
       where: {
         examId: dbExam.id,
         userId: dbUser.id,
+        status: 'in_progress',
       },
+      orderBy: { startedAt: 'desc' },
       include: {
         answers: true,
       },
     });
 
     if (!attempt) {
-      // اگر کاربر قبلاً ثبت‌نام کرده یا آزمون پایلوت رایگان است، صندلی شرکت ایجاد می‌شود
-      attempt = await this.prisma.client.attempt.create({
-        data: {
+      attempt = await this.prisma.client.attempt.findFirst({
+        where: {
           examId: dbExam.id,
           userId: dbUser.id,
-          accessType: 'Official',
-          status: 'in_progress',
-          startedAt: new Date(),
         },
+        orderBy: { startedAt: 'desc' },
         include: {
           answers: true,
         },
       });
+    }
+
+    const examQuestions = getQuestionsForExam(dbExam.slug || dbExam.id);
+    const totalQuestions = examQuestions.length;
+
+    // اصل کلاینت با دانش صفر (Zero-Knowledge Client): کلید پاسخ‌ها هرگز به فرانت‌اند ارسال نمی‌شود
+    const sanitizedQuestions = examQuestions.map((q) => {
+      const { correctOption, correctStatements, correctNumber, ...safe } = q;
+      if (safe.statements) {
+        safe.statements = safe.statements.map((s) => {
+          const { correctValue, ...safeStmt } = s;
+          return safeStmt;
+        });
+      }
+      return safe;
+    });
+
+    const isEnrolled = await this.isUserEnrolledInExam(dbUser.id, dbExam.id, dbExam.slug);
+    if (!attempt && !isEnrolled && dbExam.price > 0) {
+      throw new ForbiddenException('شما هنوز در این آزمون ثبت‌نام نکرده‌اید.');
+    }
+
+    // اگر ردیف تلاش وجود ندارد یا هنوز شروع نشده است (حالت Pre-Start State طبق دستور صریح و PRD)
+    // به هیچ وجه آزمون خودکار شروع نمی‌شود و تایمر فعال نمی‌گردد
+    if (!attempt || attempt.status === 'not_started') {
+      return {
+        hasStarted: false,
+        canStart: true,
+        isSubmitted: false,
+        examTitle: dbExam.title,
+        exam: {
+          id: dbExam.id,
+          slug: dbExam.slug,
+          title: dbExam.title,
+          durationMinutes: dbExam.durationMinutes,
+          totalQuestions,
+          price: dbExam.price,
+        },
+        attempt: attempt
+          ? {
+              id: attempt.id,
+              status: 'not_started',
+              takeoverCount: attempt.takeoverCount || 0,
+              remainingTakeovers: 2,
+            }
+          : null,
+        message: 'برای شروع پاسخ‌گویی به سؤالات، روی دکمه شروع آزمون کلیک نمایید.',
+      };
+    }
+
+    if (attempt && (attempt.takeoverCount || 0) > 0) {
+      this.examLock.syncTakeoverCount(attempt.id, attempt.takeoverCount);
     }
 
     if (attempt.status === 'submitted') {
@@ -62,6 +131,21 @@ export class ExamRoomService {
         isSubmitted: true,
         submittedAt: attempt.submittedAt,
         examTitle: dbExam.title,
+        exam: {
+          id: dbExam.id,
+          slug: dbExam.slug,
+          title: dbExam.title,
+          durationMinutes: dbExam.durationMinutes,
+          totalQuestions,
+          price: dbExam.price,
+        },
+        attempt: {
+          id: attempt.id,
+          startedAt: attempt.startedAt,
+          takeoverCount: attempt.takeoverCount || 0,
+          remainingTakeovers: 0,
+          status: attempt.status,
+        },
         message: 'شما قبلاً این آزمون را به پایان رسانده و پاسخ‌برگ را ارسال کرده‌اید.',
       };
     }
@@ -70,12 +154,13 @@ export class ExamRoomService {
     const durationMinutes = dbExam.durationMinutes || 120;
     let startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
     let expiryTime = startedAt + durationMinutes * 60 * 1000;
-    let remainingSeconds = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+    const now = Date.now();
+    let remainingSeconds = Math.max(0, Math.floor((expiryTime - now) / 1000));
 
     // اگر کاربر هنوز آزمون را آغاز نکرده یا پاسخی ثبت نکرده و زمان انقضا بر مبنای تاریخ ثبت‌نام منقضی شده است،
     // زمان شروع آزمون از لحظه ورود داوطلب به اتاق آزمون محاسبه می‌شود
-    if (remainingSeconds <= 0 && (!attempt.answers || attempt.answers.length === 0)) {
-      startedAt = Date.now();
+    if (remainingSeconds <= 0 && (!attempt.answers || attempt.answers.length === 0) && (now - startedAt > 86400000)) {
+      startedAt = now;
       expiryTime = startedAt + durationMinutes * 60 * 1000;
       remainingSeconds = durationMinutes * 60;
 
@@ -87,13 +172,55 @@ export class ExamRoomService {
         .catch(() => {});
     }
 
+    // بررسی اتمام مهلت آزمون و مهلت اضطراری ۲ دقیقه‌ای (Grace Period)
+    if (remainingSeconds <= 0) {
+      const gracePeriodMs = 120_000; // ۲ دقیقه مهلت اتصال مجدد و تخلیه بافر طبق درخواست و PRD
+      const graceRemainingSeconds = Math.max(0, Math.floor((expiryTime + gracePeriodMs - now) / 1000));
+
+      // اگر مهلت ۲ دقیقه اضافه هم تمام شده باشد، آزمون قطعی خاتمه یافته است
+      if (graceRemainingSeconds <= 0) {
+        const submittedAt = new Date(expiryTime);
+        await this.prisma.client.attempt
+          .update({
+            where: { id: attempt.id },
+            data: { status: 'submitted', submittedAt },
+          })
+          .catch(() => {});
+        await this.examLock.release(attempt.id);
+
+        return {
+          isSubmitted: true,
+          submittedAt: submittedAt.toISOString(),
+          examTitle: dbExam.title,
+          exam: {
+            id: dbExam.id,
+            slug: dbExam.slug,
+            title: dbExam.title,
+            durationMinutes: dbExam.durationMinutes,
+            totalQuestions,
+            price: dbExam.price,
+          },
+          attempt: {
+            id: attempt.id,
+            startedAt: attempt.startedAt,
+            takeoverCount: attempt.takeoverCount || 0,
+            remainingTakeovers: 0,
+            status: 'submitted',
+          },
+          message: 'مهلت پاسخ‌گویی به این آزمون به پایان رسیده و پاسخ‌های شما ثبت نهایی گردید.',
+        };
+      }
+    }
+
     // تجمیع پاسخ‌های ذخیره‌شده در Postgres و پاسخ‌های اخیر موجود در ردیس
     const redisAnswers = await this.examLock.getStoredAnswers(attempt.id);
-    const mergedAnswers: Record<number, { selectedOption: number | null; isFlagged: boolean }> = {};
+    const mergedAnswers: Record<number, { selectedOption: number | null; selectedStatements?: Record<number, boolean | null> | null; numericValue?: number | null; isFlagged: boolean }> = {};
 
-    attempt.answers.forEach((ans) => {
+    attempt.answers.forEach((ans: any) => {
       mergedAnswers[ans.questionNumber] = {
         selectedOption: ans.selectedOption,
+        selectedStatements: ans.selectedStatements || null,
+        numericValue: ans.numericValue || null,
         isFlagged: ans.isFlagged,
       };
     });
@@ -101,6 +228,8 @@ export class ExamRoomService {
     Object.entries(redisAnswers).forEach(([qNum, stored]) => {
       mergedAnswers[Number(qNum)] = {
         selectedOption: stored.selectedOption,
+        selectedStatements: stored.selectedStatements || null,
+        numericValue: stored.numericValue || null,
         isFlagged: !!stored.isFlagged,
       };
     });
@@ -119,16 +248,17 @@ export class ExamRoomService {
         slug: dbExam.slug,
         title: dbExam.title,
         durationMinutes,
-        totalQuestions: CAMPBELL_PILOT_QUESTIONS.length,
+        totalQuestions,
         price: dbExam.price,
       },
       attempt: {
         id: attempt.id,
         startedAt: attempt.startedAt,
-        takeoverCount: attempt.takeoverCount,
+        takeoverCount: attempt.takeoverCount || 0,
+        remainingTakeovers: Math.max(0, 2 - (attempt.takeoverCount || 0)),
         status: attempt.status,
       },
-      questions: CAMPBELL_PILOT_QUESTIONS,
+      questions: sanitizedQuestions,
       answers: mergedAnswers,
       remainingSeconds,
       serverTime: new Date().toISOString(),
@@ -137,12 +267,81 @@ export class ExamRoomService {
   }
 
   /**
-   * شروع رسمی و دریافت قفل فعال نشست در اتاق آزمون
+   * شروع رسمی و دریافت قفل فعال نشست در اتاق آزمون (State Machine: NOT_STARTED -> IN_PROGRESS)
    */
-  async startExam(attemptId: string, userId: string, sessionId: string, deviceId: string) {
-    await this.assertAttemptAccess(attemptId, userId);
-    const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
-    return this.examLock.acquire(ctx);
+  async startExam(identifier: string, userId: string, sessionId: string, deviceId: string) {
+    const dbUser = await this.resolveUser(userId);
+    let attempt: any = null;
+    let dbExam: any = null;
+
+    // بررسی آیا پارامتر ارسالی attemptId است یا exam slug / id
+    if (this.isUuid(identifier)) {
+      try {
+        attempt = await this.prisma.client.attempt.findUnique({
+          where: { id: identifier },
+          include: { exam: true, answers: true },
+        });
+        if (attempt) {
+          dbExam = attempt.exam;
+        }
+      } catch {}
+    }
+
+    if (!dbExam) {
+      dbExam = await this.resolveExam(identifier);
+    }
+
+    if (!attempt) {
+      attempt = await this.prisma.client.attempt.findFirst({
+        where: { examId: dbExam.id, userId: dbUser.id },
+        include: { answers: true },
+      });
+    }
+
+    const isEnrolled = await this.isUserEnrolledInExam(dbUser.id, dbExam.id, dbExam.slug);
+    if (!attempt && !isEnrolled && dbExam.price > 0) {
+      throw new ForbiddenException('برای شروع آزمون، ابتدا باید در آزمون ثبت‌نام فرمایید.');
+    }
+
+    if (attempt?.status === 'submitted') {
+      throw new BadRequestException('این آزمون قبلاً به پایان رسیده و پاسخ‌برگ آن ارسال گردیده است.');
+    }
+
+    const now = new Date();
+    if (!attempt) {
+      attempt = await this.prisma.client.attempt.create({
+        data: {
+          examId: dbExam.id,
+          userId: dbUser.id,
+          accessType: 'Official',
+          status: 'in_progress',
+          startedAt: now,
+        },
+        include: { answers: true },
+      });
+    } else if (attempt.status === 'not_started') {
+      attempt = await this.prisma.client.attempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: 'in_progress',
+          startedAt: now,
+        },
+        include: { answers: true },
+      });
+    }
+
+    if (attempt && (attempt.takeoverCount || 0) > 0) {
+      this.examLock.syncTakeoverCount(attempt.id, attempt.takeoverCount);
+    }
+
+    const ctx: LockContext = { attemptId: attempt.id, userId: dbUser.id, sessionId, deviceId };
+    const lockResult = await this.examLock.acquire(ctx);
+
+    const roomData = await this.initRoom(dbExam.slug || dbExam.id, dbUser.id, sessionId, deviceId);
+    return {
+      ...roomData,
+      lock: lockResult,
+    };
   }
 
   /**
@@ -156,7 +355,40 @@ export class ExamRoomService {
     clientSeq: number,
     answers: StoredAnswer[] = [],
   ) {
-    await this.assertAttemptAccess(attemptId, userId);
+    const attempt = await this.assertAttemptAccess(attemptId, userId);
+    if (attempt.status === 'submitted') {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'EXAM_ALREADY_SUBMITTED',
+        message: 'این آزمون قبلاً به پایان رسیده و تغییر پاسخ‌ها مسدود است.',
+      });
+    }
+
+    const dbExam = await this.resolveExam(attempt.examId);
+    const durationMinutes = dbExam.durationMinutes || 120;
+    const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
+    const expiryTime = startedAt + durationMinutes * 60 * 1000;
+    const now = Date.now();
+    const gracePeriodMs = 120_000; // ۲ دقیقه مهلت اضطراری برای وصل شدن و تخلیه صف آفلاین طبق PRD
+
+    // اگر زمان آزمون به همراه ۲ دقیقه مهلت اضطراری سپری شده باشد، پاسخ جدید نمی‌پذیریم و آزمون قطعی ثبت می‌شود
+    if (now > expiryTime + gracePeriodMs) {
+      if (attempt.status !== 'submitted') {
+        await this.prisma.client.attempt
+          .update({
+            where: { id: attemptId },
+            data: { status: 'submitted', submittedAt: new Date(expiryTime) },
+          })
+          .catch(() => {});
+        await this.examLock.release(attemptId);
+      }
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'EXAM_TIME_EXPIRED',
+        message: 'مهلت رسمی و مهلت اضطراری آزمون به پایان رسیده و پاسخ‌برگ ثبت نهایی شده است.',
+      });
+    }
+
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     const result = await this.examLock.heartbeat(ctx, clientSeq, answers);
 
@@ -171,12 +403,23 @@ export class ExamRoomService {
   }
 
   /**
-   * تصاحب قفل از دستگاه قبلی توسط دستگاه جدید
+   * تصاحب قفل از دستگاه قبلی توسط دستگاه جدید و همگام‌سازی کامل پاسخ‌ها
    */
   async takeover(attemptId: string, userId: string, sessionId: string, deviceId: string) {
     await this.assertAttemptAccess(attemptId, userId);
     const ctx: LockContext = { attemptId, userId, sessionId, deviceId };
     const result = await this.examLock.takeover(ctx);
+
+    // ارسال بلادرنگ رویداد اخراج به دستگاه قبلی از طریق جریان SSE
+    if (result.status === 'taken_over') {
+      this.lockEvents$.next({
+        attemptId,
+        type: 'LOCK_LOST',
+        previousDeviceId: result.previousDeviceId,
+        newDeviceId: deviceId,
+        version: result.version,
+      });
+    }
 
     // به‌روزرسانی شمارنده takeover در دیتابیس Postgres
     try {
@@ -188,7 +431,50 @@ export class ExamRoomService {
       // ignore
     }
 
-    return result;
+    // استخراج پاسخ‌های ثبت‌شده دستگاه قبلی برای اعمال و اورراید روی دستگاه جدید
+    const answers = await this.getMergedAnswers(attemptId);
+
+    return {
+      ...result,
+      answers,
+    };
+  }
+
+  /**
+   * تجمیع پاسخ‌های ذخیره‌شده در دیتابیس Postgres و پاسخ‌های اخیر ردیس
+   */
+  async getMergedAnswers(attemptId: string): Promise<Record<number, { selectedOption: number | null; selectedStatements?: Record<number, boolean | null> | null; numericValue?: number | null; isFlagged: boolean }>> {
+    const redisAnswers = await this.examLock.getStoredAnswers(attemptId);
+    let dbAnswers: any[] = [];
+    try {
+      dbAnswers = await this.prisma.client.attemptAnswer.findMany({
+        where: { attemptId },
+      });
+    } catch {
+      // fallback
+    }
+
+    const mergedAnswers: Record<number, { selectedOption: number | null; selectedStatements?: Record<number, boolean | null> | null; numericValue?: number | null; isFlagged: boolean }> = {};
+
+    dbAnswers.forEach((ans: any) => {
+      mergedAnswers[ans.questionNumber] = {
+        selectedOption: ans.selectedOption,
+        selectedStatements: ans.selectedStatements || null,
+        numericValue: ans.numericValue || null,
+        isFlagged: ans.isFlagged,
+      };
+    });
+
+    Object.entries(redisAnswers).forEach(([qNum, stored]) => {
+      mergedAnswers[Number(qNum)] = {
+        selectedOption: stored.selectedOption,
+        selectedStatements: stored.selectedStatements || null,
+        numericValue: stored.numericValue || null,
+        isFlagged: !!stored.isFlagged,
+      };
+    });
+
+    return mergedAnswers;
   }
 
   /**
@@ -248,14 +534,23 @@ export class ExamRoomService {
     // آزادسازی قفل ردیس
     await this.examLock.release(ctx);
 
-    // آمار نهایی پاسخ‌برگ
+    // استخراج سوالات و آمار نهایی پاسخ‌برگ
+    const examQuestions = getQuestionsForExam(attempt.exam?.slug || attempt.examId);
+    const totalQuestions = examQuestions.length;
+
     const allAnswers = await this.prisma.client.attemptAnswer.findMany({
       where: { attemptId },
     });
 
-    const answeredCount = allAnswers.filter((a) => a.selectedOption !== null && a.selectedOption > 0).length;
+    const answeredCount = allAnswers.filter((a: any) => {
+      const hasOption = a.selectedOption !== null && a.selectedOption > 0;
+      const hasStatements = a.selectedStatements && Object.values(a.selectedStatements).some((v) => v !== null && v !== undefined);
+      const hasNumeric = a.numericValue !== null && a.numericValue !== undefined;
+      return hasOption || hasStatements || hasNumeric;
+    }).length;
+
     const flaggedCount = allAnswers.filter((a) => a.isFlagged).length;
-    const unansweredCount = CAMPBELL_PILOT_QUESTIONS.length - answeredCount;
+    const unansweredCount = Math.max(0, totalQuestions - answeredCount);
 
     return {
       success: true,
@@ -263,7 +558,7 @@ export class ExamRoomService {
       message: 'پاسخ‌برگ شما با موفقیت ثبت نهایی شد و آزمون به پایان رسید.',
       submittedAt: submittedAt.toISOString(),
       summary: {
-        totalQuestions: CAMPBELL_PILOT_QUESTIONS.length,
+        totalQuestions,
         answeredCount,
         unansweredCount,
         flaggedCount,
@@ -436,5 +731,37 @@ export class ExamRoomService {
     }
 
     return user;
+  }
+
+  private async isUserEnrolledInExam(userId: string, examId: string, slug?: string): Promise<boolean> {
+    try {
+      if (!this.isUuid(userId)) return true;
+
+      // ۱. بررسی ثبت‌نام در جدول Attempt
+      const att = await this.prisma.client.attempt.findFirst({
+        where: { userId, examId },
+      });
+      if (att) return true;
+
+      // ۲. بررسی در سفارش‌های پرداخت‌شده
+      const orders = await this.prisma.client.order.findMany({
+        where: { userId, status: 'paid' },
+        include: { ledgerEntries: true },
+      });
+
+      for (const ord of orders) {
+        if (
+          ord.ledgerEntries?.some(
+            (l: any) =>
+              l.description?.includes(examId) || (slug && l.description?.includes(slug)),
+          )
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      return true;
+    }
+    return false;
   }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getOrCreateDeviceId } from '@/lib/device';
 
 export type HeartbeatStatus =
   | 'idle'
@@ -11,9 +12,18 @@ export type HeartbeatStatus =
   | 'submitted'
   | 'error';
 
+export interface AnswerStateItem {
+  selectedOption: number | null;
+  selectedStatements?: Record<number, boolean | null> | null;
+  numericValue?: number | null;
+  isFlagged: boolean;
+}
+
 export interface PendingAnswer {
   questionNumber: number;
   selectedOption: number | null;
+  selectedStatements?: Record<number, boolean | null> | null;
+  numericValue?: number | null;
   isFlagged?: boolean;
   answeredAt: number;
 }
@@ -30,7 +40,9 @@ export interface TakeoverInfo {
 export interface UseExamHeartbeatOptions {
   attemptId: string;
   examSlug: string;
-  initialAnswers?: Record<number, { selectedOption: number | null; isFlagged: boolean }>;
+  initialAnswers?: Record<number, AnswerStateItem>;
+  initialRemainingTakeovers?: number;
+  deviceId?: string;
   enabled?: boolean;
   heartbeatIntervalMs?: number;
   onLockLost?: (info: TakeoverInfo) => void;
@@ -42,6 +54,8 @@ export function useExamHeartbeat({
   attemptId,
   examSlug,
   initialAnswers = {},
+  initialRemainingTakeovers = 2,
+  deviceId: optionsDeviceId,
   enabled = true,
   heartbeatIntervalMs = 30000,
   onLockLost,
@@ -49,29 +63,38 @@ export function useExamHeartbeat({
   onSubmitted,
 }: UseExamHeartbeatOptions) {
   const [status, setStatus] = useState<HeartbeatStatus>('idle');
-  const [answers, setAnswers] = useState<Record<number, { selectedOption: number | null; isFlagged: boolean }>>(
+  const [answers, setAnswers] = useState<Record<number, AnswerStateItem>>(
     initialAnswers,
   );
-  const [remainingTakeovers, setRemainingTakeovers] = useState<number>(2);
+  const [remainingTakeovers, setRemainingTakeovers] = useState<number>(initialRemainingTakeovers);
+
+  useEffect(() => {
+    if (initialRemainingTakeovers !== undefined) {
+      setRemainingTakeovers(initialRemainingTakeovers);
+    }
+  }, [initialRemainingTakeovers]);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [takeoverInfo, setTakeoverInfo] = useState<TakeoverInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [deviceId, setDeviceId] = useState<string>('');
+  const [deviceId, setDeviceId] = useState<string>(() => {
+    return optionsDeviceId || getOrCreateDeviceId();
+  });
+
+  useEffect(() => {
+    if (!deviceId) {
+      const did = optionsDeviceId || getOrCreateDeviceId();
+      if (did) setDeviceId(did);
+    }
+  }, [optionsDeviceId, deviceId]);
 
   const clientSeqRef = useRef<number>(1);
   const pendingQueueRef = useRef<Map<number, PendingAnswer>>(new Map());
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const statusRef = useRef<HeartbeatStatus>(status);
 
-  // تولید یا خواندن شناسه یکتای دستگاه در localStorage
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let did = localStorage.getItem('condor_device_id');
-    if (!did) {
-      did = `dev_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
-      localStorage.setItem('condor_device_id', did);
-    }
-    setDeviceId(did);
-  }, []);
+    statusRef.current = status;
+  }, [status]);
 
   // بارگذاری پاسخ‌های قبلی از localStorage در صورت وجود
   useEffect(() => {
@@ -105,7 +128,8 @@ export function useExamHeartbeat({
    */
   const sendHeartbeat = useCallback(
     async (isManual = false) => {
-      if (!attemptId || !deviceId || status === 'submitted' || status === 'lock_lost') return;
+      const activeDeviceId = deviceId || getOrCreateDeviceId();
+      if (!attemptId || !activeDeviceId || statusRef.current === 'submitted' || statusRef.current === 'lock_lost') return;
 
       const queueItems = Array.from(pendingQueueRef.current.values());
       const currentSeq = clientSeqRef.current++;
@@ -119,12 +143,12 @@ export function useExamHeartbeat({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-device-id': deviceId,
+            'x-device-id': activeDeviceId,
           },
           body: JSON.stringify({
             clientSeq: currentSeq,
             answers: queueItems,
-            deviceId,
+            deviceId: activeDeviceId,
           }),
         });
 
@@ -136,14 +160,16 @@ export function useExamHeartbeat({
             pendingQueueRef.current.delete(item.questionNumber);
           });
           setLastSyncTime(new Date());
-          setRemainingTakeovers(data.remainingTakeovers ?? 2);
+          if (data.remainingTakeovers !== undefined) {
+            setRemainingTakeovers(data.remainingTakeovers);
+          }
           setStatus('active');
           setErrorMessage(null);
           return;
         }
 
         if (res.status === 403) {
-          if (data.code === 'EXAM_LOCK_LOST' || data.code === 'EXAM_LOCK_MISSING') {
+          if (data.code === 'EXAM_LOCK_LOST') {
             const info: TakeoverInfo = {
               code: data.code,
               message: data.message || 'نشست دیگری وارد آزمون شد.',
@@ -153,6 +179,12 @@ export function useExamHeartbeat({
             setStatus('lock_lost');
             setTakeoverInfo(info);
             onLockLost?.(info);
+            return;
+          }
+
+          if (data.code === 'EXAM_LOCK_MISSING') {
+            // در صورت انقضای موقت قفل بدون تسخیر توسط دستگاه دیگر، قفل بدون مزاحمت برای داوطلب تمدید می‌شود
+            startExam();
             return;
           }
         }
@@ -179,29 +211,34 @@ export function useExamHeartbeat({
         setStatus('offline');
       }
     },
-    [attemptId, deviceId, onLockLost, onTakeoverRequired, status],
+    [attemptId, deviceId, onLockLost, onTakeoverRequired],
   );
 
   /**
    * درخواست اولیه شروع و دریافت قفل
    */
   const startExam = useCallback(async () => {
-    if (!attemptId || !deviceId) return;
+    const activeDeviceId = deviceId || getOrCreateDeviceId();
+    if (!attemptId || !activeDeviceId) return;
     try {
       const res = await fetch(`/api/exam-room/${attemptId}/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-device-id': deviceId,
+          'x-device-id': activeDeviceId,
         },
-        body: JSON.stringify({ deviceId }),
+        body: JSON.stringify({ deviceId: activeDeviceId }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (res.ok) {
         setStatus('active');
+        setTakeoverInfo(null);
         setLastSyncTime(new Date());
+        if (data.remainingTakeovers !== undefined) {
+          setRemainingTakeovers(data.remainingTakeovers);
+        }
         return;
       }
 
@@ -250,6 +287,16 @@ export function useExamHeartbeat({
         setTakeoverInfo(null);
         setRemainingTakeovers(data.remainingTakeovers ?? 1);
         setLastSyncTime(new Date());
+
+        // همگام‌سازی و اورراید فوری پاسخ‌های دستگاه مبدا روی این دستگاه
+        if (data.answers && typeof data.answers === 'object') {
+          setAnswers((prev) => {
+            const merged = { ...prev, ...data.answers };
+            persistLocally(merged);
+            return merged;
+          });
+        }
+
         return true;
       }
 
@@ -265,17 +312,24 @@ export function useExamHeartbeat({
   }, [attemptId, deviceId]);
 
   /**
-   * تغییر و ثبت گزینه یک سوال
+   * تغییر و ثبت گزینه یا پاسخ تحلیلی یک سوال
    */
   const recordAnswer = useCallback(
-    (questionNumber: number, selectedOption: number | null) => {
+    (
+      questionNumber: number,
+      selectedOption: number | null,
+      selectedStatements?: Record<number, boolean | null> | null,
+      numericValue?: number | null,
+    ) => {
       setAnswers((prev) => {
-        const currentFlag = prev[questionNumber]?.isFlagged ?? false;
+        const current = prev[questionNumber];
         const updated = {
           ...prev,
           [questionNumber]: {
             selectedOption,
-            isFlagged: currentFlag,
+            selectedStatements: selectedStatements !== undefined ? selectedStatements : (current?.selectedStatements || null),
+            numericValue: numericValue !== undefined ? numericValue : (current?.numericValue || null),
+            isFlagged: current?.isFlagged ?? false,
           },
         };
         persistLocally(updated);
@@ -286,7 +340,78 @@ export function useExamHeartbeat({
       pendingQueueRef.current.set(questionNumber, {
         questionNumber,
         selectedOption,
+        selectedStatements,
+        numericValue,
         answeredAt: Date.now(),
+      });
+    },
+    [persistLocally],
+  );
+
+  /**
+   * ثبت انتخاب درست/غلط برای یک گزاره در سوالات گزاره‌ای مرحله دوم (PRD ۵٫۳٫۴)
+   */
+  const recordStatement = useCallback(
+    (questionNumber: number, statementIdx: number, val: boolean | null) => {
+      setAnswers((prev) => {
+        const current = prev[questionNumber];
+        const prevStmts = current?.selectedStatements || {};
+        const updatedStmts = { ...prevStmts, [statementIdx]: val };
+        const updated = {
+          ...prev,
+          [questionNumber]: {
+            selectedOption: current?.selectedOption ?? null,
+            selectedStatements: updatedStmts,
+            numericValue: current?.numericValue ?? null,
+            isFlagged: current?.isFlagged ?? false,
+          },
+        };
+        persistLocally(updated);
+
+        pendingQueueRef.current.set(questionNumber, {
+          questionNumber,
+          selectedOption: current?.selectedOption ?? null,
+          selectedStatements: updatedStmts,
+          numericValue: current?.numericValue ?? null,
+          isFlagged: current?.isFlagged ?? false,
+          answeredAt: Date.now(),
+        });
+
+        return updated;
+      });
+    },
+    [persistLocally],
+  );
+
+  /**
+   * ثبت پاسخ عددی دو رقمی (۰ تا ۹۹) برای مسائل محاسباتی مرحله دوم (PRD ۵٫۳٫۴)
+   */
+  const recordNumeric = useCallback(
+    (questionNumber: number, val: number | null) => {
+      setAnswers((prev) => {
+        const current = prev[questionNumber];
+        const normalized = val === null || val === undefined ? null : Math.max(0, Math.min(99, Math.floor(val)));
+        const updated = {
+          ...prev,
+          [questionNumber]: {
+            selectedOption: null,
+            selectedStatements: null,
+            numericValue: normalized,
+            isFlagged: current?.isFlagged ?? false,
+          },
+        };
+        persistLocally(updated);
+
+        pendingQueueRef.current.set(questionNumber, {
+          questionNumber,
+          selectedOption: null,
+          selectedStatements: null,
+          numericValue: normalized,
+          isFlagged: current?.isFlagged ?? false,
+          answeredAt: Date.now(),
+        });
+
+        return updated;
       });
     },
     [persistLocally],
@@ -298,12 +423,17 @@ export function useExamHeartbeat({
   const toggleFlag = useCallback(
     (questionNumber: number) => {
       setAnswers((prev) => {
-        const currentOption = prev[questionNumber]?.selectedOption ?? null;
-        const currentFlag = prev[questionNumber]?.isFlagged ?? false;
+        const current = prev[questionNumber];
+        const currentOption = current?.selectedOption ?? null;
+        const currentStatements = current?.selectedStatements ?? null;
+        const currentNumeric = current?.numericValue ?? null;
+        const currentFlag = current?.isFlagged ?? false;
         const updated = {
           ...prev,
           [questionNumber]: {
             selectedOption: currentOption,
+            selectedStatements: currentStatements,
+            numericValue: currentNumeric,
             isFlagged: !currentFlag,
           },
         };
@@ -316,6 +446,8 @@ export function useExamHeartbeat({
       pendingQueueRef.current.set(questionNumber, {
         questionNumber,
         selectedOption: currentAnswer?.selectedOption ?? null,
+        selectedStatements: currentAnswer?.selectedStatements ?? null,
+        numericValue: currentAnswer?.numericValue ?? null,
         isFlagged: !(currentAnswer?.isFlagged ?? false),
         answeredAt: Date.now(),
       });
@@ -332,6 +464,8 @@ export function useExamHeartbeat({
     const allAnswersList: PendingAnswer[] = Object.entries(answers).map(([qNum, val]) => ({
       questionNumber: Number(qNum),
       selectedOption: val.selectedOption,
+      selectedStatements: val.selectedStatements,
+      numericValue: val.numericValue,
       isFlagged: val.isFlagged,
       answeredAt: Date.now(),
     }));
@@ -355,6 +489,8 @@ export function useExamHeartbeat({
         setStatus('submitted');
         if (typeof window !== 'undefined') {
           localStorage.removeItem(`condor_exam_answers_${attemptId}`);
+          localStorage.removeItem('condor_active_exam');
+          window.dispatchEvent(new Event('condor_active_exam_change'));
         }
         onSubmitted?.();
         return { success: true, summary: data.summary };
@@ -391,13 +527,22 @@ export function useExamHeartbeat({
     [attemptId],
   );
 
-  // چرخه اجرای خودکار هارت‌بیت هر ۳۰ ثانیه
+  const hasStartedRef = useRef(false);
+
+  useEffect(() => {
+    hasStartedRef.current = false;
+  }, [attemptId]);
+
+  // چرخه اجرای خودکار هارت‌بیت هر ۳۰ ثانیه (بدون تکرار بی‌مورد startExam)
   useEffect(() => {
     if (!enabled || !attemptId || !deviceId || status === 'submitted' || status === 'lock_lost') {
       return;
     }
 
-    startExam();
+    if (!hasStartedRef.current) {
+      hasStartedRef.current = true;
+      startExam();
+    }
 
     timerRef.current = setInterval(() => {
       sendHeartbeat();
@@ -406,7 +551,71 @@ export function useExamHeartbeat({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [enabled, attemptId, deviceId, heartbeatIntervalMs, sendHeartbeat, startExam, status]);
+  }, [enabled, attemptId, deviceId, heartbeatIntervalMs, sendHeartbeat, startExam, status === 'submitted' || status === 'lock_lost']);
+
+  // اتصال بلادرنگ SSE برای اخراج فوری دستگاه قبلی (Instant Kick-Out زیر ۱ ثانیه)
+  useEffect(() => {
+    if (!enabled || !attemptId || !deviceId || status === 'submitted' || status === 'lock_lost') {
+      return;
+    }
+
+    let eventSource: EventSource | null = null;
+    const activeDeviceId = deviceId || getOrCreateDeviceId();
+    try {
+      eventSource = new EventSource(`/api/exam-room/${attemptId}/events`);
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'LOCK_LOST' && payload.previousDeviceId === activeDeviceId) {
+            const info: TakeoverInfo = {
+              code: 'EXAM_LOCK_LOST',
+              message: 'آزمون در دستگاه دیگری فعال شد و دسترسی این دستگاه فوراً معلق گردید.',
+              canTakeover: true,
+              remainingTakeovers: Math.max(0, remainingTakeovers - 1),
+            };
+            setStatus('lock_lost');
+            setTakeoverInfo(info);
+            onLockLost?.(info);
+          }
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      // fallback
+    }
+
+    // پروب سریع هر ۴ ثانیه برای پایش تغییر مالکیت در پس‌زمینه
+    const probeInterval = setInterval(async () => {
+      if (statusRef.current === 'submitted' || statusRef.current === 'lock_lost') return;
+      try {
+        const checkRes = await fetch(`/api/exam-room/${attemptId}/lock`, {
+          headers: { 'x-device-id': activeDeviceId },
+        });
+        if (checkRes.ok) {
+          const stateData = await checkRes.json();
+          if (stateData && stateData.locked && !stateData.isOwner) {
+            const info: TakeoverInfo = {
+              code: 'EXAM_LOCK_LOST',
+              message: 'آزمون در دستگاه دیگری فعال شد و دسترسی این دستگاه فوراً معلق گردید.',
+              canTakeover: stateData.canTakeover ?? true,
+              remainingTakeovers: stateData.remainingTakeovers ?? 0,
+            };
+            setStatus('lock_lost');
+            setTakeoverInfo(info);
+            onLockLost?.(info);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, 4000);
+
+    return () => {
+      if (eventSource) eventSource.close();
+      clearInterval(probeInterval);
+    };
+  }, [enabled, attemptId, deviceId, status, remainingTakeovers, onLockLost]);
 
   return {
     status,
@@ -417,6 +626,8 @@ export function useExamHeartbeat({
     errorMessage,
     deviceId,
     recordAnswer,
+    recordStatement,
+    recordNumeric,
     toggleFlag,
     sendHeartbeat,
     takeoverExam,
