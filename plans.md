@@ -44,10 +44,10 @@ This comprehensive audit of the CondorLab repository was conducted following rep
 ### Highest-Risk Findings Overview
 
 1. **Student Answer Sheet Data Loss & Inconsistent Results (Critical Integrity Risk):**  
-   The PostgreSQL `attempt_answers` table ([`packages/database/prisma/schema.prisma`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246)) only possesses a `selected_option` integer column. It lacks columns for multi-statement Stage 2 boolean answers (`selectedStatements`) and Stage 2 numeric calculations (`numericValue`). Stage 2 answers are only retained transiently in Redis. When Redis keys expire, restart, or when querying the database directly, all Stage 2 candidate inputs are lost, causing scores and answer keys to display inconsistently upon page refresh. Furthermore, answer saves in `heartbeat` are unawaited (fire-and-forget), introducing a write-race condition upon rapid refresh.
+   The PostgreSQL `attempt_answers` table ([`packages/database/prisma/schema.prisma`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246)) only possesses a `selected_option` integer column. It lacks columns for multi-statement Stage 2 boolean answers (`selectedStatements`) and Stage 2 numeric calculations (`numericValue`). Furthermore, the controller request interfaces (`HeartbeatBody`, `SubmitBody`) and service `persistAnswers` omit these fields, dropping them before PostgreSQL persistence. Consequently, Stage 2 answers are only retained transiently in volatile Redis hashes. When Redis keys expire, restart, or when querying the database directly, all Stage 2 candidate inputs are lost, causing scores and answer keys to display inconsistently upon page refresh. In addition, answer persistence in `heartbeat` is unawaited (fire-and-forget), introducing a write-race condition upon rapid refresh.
 
 2. **Unauthenticated Identity Impersonation & Participant Link Lobby Bug (Critical Security & Access Risk):**  
-   In [`apps/api/src/modules/exam-room/exam-room.service.ts`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L904) (`resolveUser`), whenever a `userId` is not a valid UUID (such as unauthenticated requests falling back to `'demo_user'`), the service executes `this.prisma.client.user.findFirst()` instead of rejecting with HTTP 401. If the first user in the database (e.g. test admin) already submitted an attempt, any visitor opening a participation link is silently bound to that user and shown the message *"شما قبلاً این آزمون را به پایان رسانده‌اید"* (You have already completed this exam), leaking attempt records and blocking participation.
+   In [`apps/api/src/modules/exam-room/exam-room.service.ts`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L904) (`resolveUser`), whenever a `userId` is not a valid UUID (such as controller requests passing default fallback `'demo_user'`), the service executes `this.prisma.client.user.findFirst()` instead of rejecting with HTTP 401. If the first user in the database (e.g. test admin) already submitted an attempt, any visitor opening a participation link with an unresolvable user ID is silently bound to that user and shown the message *"شما قبلاً این آزمون را به پایان رسانده‌اید"* (You have already completed this exam), leaking attempt records and blocking participation.
 
 3. **Store State Desynchronization & Stale Guest Cache Serving (High User Impact):**  
    The client-side [`StoreCacheContext`](file:///Users/matinmousavi/Desktop/Condorlab/apps/web/src/context/store-cache-context.tsx#L24-L56) stores catalog data in a module-level variable `memoryStoreCatalog` and `sessionStorage` with `STALE_TIME_MS = Infinity` and zero `userId` tracking. Once an unauthenticated guest visits the store, the guest catalog is cached permanently. Logging in, switching users, or purchasing an exam never clears this cache because the context has no event listeners. Additionally, backend [`exams.service.ts`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exams/exams.service.ts#L125-L130) falls back to hardcoded `mockExams` whenever a database hiccup occurs, causing products to appear and disappear randomly between refreshes.
@@ -99,7 +99,7 @@ Here is the objective audit of the 13 mandatory G1 prerequisites:
 
 > [!IMPORTANT]
 > **Definitive Gate G1 Status: INCOMPLETE / BLOCKED.**  
-> 6 of the 13 mandatory G1 prerequisites (1, 2, 5, 7, 8, 13) are incomplete, deficient, or mocked. Substantial application code was created prior to the formal sign-off of Green Gate G1.
+> Exactly 3 of the 13 mandatory G1 prerequisites (#4, #10, #12) are fully complete. 4 prerequisites (#3, #6, #9, #11) are only partially complete or partially verified, and 6 prerequisites (#1, #2, #5, #7, #8, #13) are incomplete, deficient, mocked, or unverifiable. Therefore, 10 of the 13 prerequisites are not fully satisfied, and Gate G1 is definitively blocked. Substantial application code was created prior to the formal sign-off of Green Gate G1.
 
 #### Analysis of Ambiguity Between G1 and Remediation Work:
 1. **The Governance Conflict:**  
@@ -151,20 +151,22 @@ Here is the objective audit of the 13 mandatory G1 prerequisites:
 * **Severity:** Critical | **Priority:** P0 (Severe Security Vulnerability & Exam Participation Blocker)
 * **Affected Feature:** Exam participation link, lobby initialization, candidate attempt access.
 * **Reproduction Status:** Confirmed reproducible by code inspection.
-  1. An unauthenticated candidate or candidate with missing/delayed session cookie clicks an exam participation link (`/exam/[id]/room`).
-  2. The request hits [`GET /api/exam-room/:identifier/init`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L60-L68). Controller passes `user?.id || 'demo_user'`.
-  3. `resolveUser('demo_user')` runs. Because `'demo_user'` is not a UUID, line 898 executes: `user = await this.prisma.client.user.findFirst({ include: { profile: true } })`.
-  4. The backend binds the request to the first user in the database (e.g. test admin).
-  5. If that first user has an attempt with `status = 'submitted'`, `initRoom` returns `isSubmitted: true` with message *"شما قبلاً این آزمون را به پایان رسانده و پاسخ‌برگ را ارسال کرده‌اید"*.
+  1. An exam participation request reaches [`GET /api/exam-room/:identifier/init`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L60-L68).
+  2. While `ExamRoomController` is decorated with `@UseGuards(AuthGuard)` at class level (line 41), handler methods supply permissive fallback literals: `user?.id || 'demo_user'`, `user?.sessionId || 'sess_demo'`.
+  3. `resolveUser('demo_user')` runs in [`apps/api/src/modules/exam-room/exam-room.service.ts:884-904`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L904). Because `'demo_user'` is not a UUID, `findUnique` is bypassed, and line 898 executes: `user = await this.prisma.client.user.findFirst({ include: { profile: true } })`.
+  4. The backend silently binds the session to the first user found in PostgreSQL (e.g. test admin).
+  5. Furthermore, `isUserEnrolledInExam` ([`exam-room.service.ts:923-925`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L923-L925)) returns `true` unconditionally for any non-UUID `userId`, completely bypassing enrollment verification.
+  6. If that first database user has an attempt with `status = 'submitted'`, `initRoom` returns `isSubmitted: true` with message *"شما قبلاً این آزمون را به پایان رسانده و پاسخ‌برگ را ارسال کرده‌اید"*, exposing another user's attempt status and blocking candidate entry.
 * **Expected vs Actual Behavior:**
-  * *Expected:* Unauthenticated requests to private exam room init MUST be rejected with HTTP 401 Unauthorized, prompting login with safe `returnTo`.
-  * *Actual:* Request is silently bound to the first database user, exposing that user's attempt status, answers, and falsely claiming the participant has already submitted.
+  * *Expected:* Unauthenticated or unresolvable candidate requests MUST be rejected with HTTP 401 Unauthorized, never bound to an arbitrary database user.
+  * *Actual:* Requests with non-UUID or unresolvable IDs are silently bound to the first database user, exposing that user's attempt status, answers, and falsely claiming the participant has already submitted.
 * **Evidence & Exact References:**
-  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:60-68`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L60-L68): Missing `@UseGuards(AuthGuard)`; passes `user?.id || 'demo_user'`.
+  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:41, 60-68`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L41): Class has `@UseGuards(AuthGuard)`, but handler defaults to `user?.id || 'demo_user'` and `user?.sessionId || 'sess_demo'`.
   * [`apps/api/src/modules/exam-room/exam-room.service.ts:884-901`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L901): `resolveUser` falls back to `findFirst()`.
+  * [`apps/api/src/modules/exam-room/exam-room.service.ts:923-925`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L923-L925): `isUserEnrolledInExam` returns `true` if `userId` is not a UUID.
   * [`apps/api/src/modules/exam-room/exam-room.service.ts:261-304`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L261-L304): If first user's attempt is submitted, returns `isSubmitted: true`.
-* **Confirmed Root Cause:** Hardcoded mock identity fallback in production API service combined with omitted authentication guard on exam room endpoints.
-* **Data-Integrity / Security Risk:** Critical data exposure (violates PRD 5.3.8 and GDPR/privacy mandates) and breaks exam admission.
+* **Confirmed Root Cause:** Unsafe query fallback in `ExamRoomService.resolveUser` (which queries `prisma.user.findFirst()` when `userId` is not a UUID or not found in the database) combined with permissive default arguments (`'demo_user'`) in `ExamRoomController`. (Correction: The controller does NOT lack `@UseGuards(AuthGuard)`; the guard is present on the controller class, but handler default parameters and service fallback logic bypass intended candidate isolation without requiring a broad authentication redesign).
+* **Data-Integrity / Security Risk:** Critical data exposure (violates PRD 5.3.8 and privacy mandates) and breaks candidate exam admission.
 * **PRD/Documentation Requirements:** PRD 4.3, 5.3.8, `CONDORLAB_SITEMAP_FA.md` Section 0 ("Protected paths must never open without authorization").
 * **User Clarification Required:** No. Standard security requirement.
 
@@ -250,23 +252,25 @@ Here is the objective audit of the 13 mandatory G1 prerequisites:
 * **Severity:** Critical | **Priority:** P0 (Core Data Integrity & Grading Reliability)
 * **Affected Feature:** Exam Room answering, Answer autosave, Answer Sheet Summary (`/exam/[id]/summary`), Result scoring.
 * **Reproduction Status:** Confirmed reproducible by schema and code inspection.
-  1. A candidate participates in a Stage 2 exam consisting of 5-statement True/False questions and short-answer numeric questions.
-  2. During the exam, candidate answers statements and numeric questions.
-  3. `useExamHeartbeat` sends answers to `POST /api/exam-room/:attemptId/heartbeat`.
-  4. Redis stores the full payload in `answersKey(attemptId)`.
-  5. [`exam-room.service.ts:569`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L569) calls `this.persistAnswers(attemptId, answers)` asynchronously **without `await`**.
-  6. In `persistAnswers` ([`exam-room.service.ts:807-834`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L807-L834)), the code attempts to save to `prisma.attemptAnswer`.
-  7. However, the database schema [`packages/database/prisma/schema.prisma:234-246`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246) **only has `selectedOption Int?`**. It has NO columns for `selectedStatements` or `numericValue`!
-  8. Those answers are never saved to PostgreSQL.
-  9. When candidate refreshes the answer sheet or submits, `getMergedAnswers` merges PostgreSQL and Redis. If Redis has evicted the key or when reading from database, all Stage 2 statement selections and numeric inputs vanish, changing computed scores and displayed answer correctness.
+  1. A candidate participates in a Stage 2 exam consisting of 5-statement analytical proposition questions (`ص / غ`) and short-answer numeric calculations (0–99).
+  2. During the exam, the candidate evaluates statements and enters numeric answers.
+  3. `useExamHeartbeat` sends answers in the request body to `POST /api/exam-room/:attemptId/heartbeat`.
+  4. In `ExamRoomController` ([`apps/api/src/modules/exam-room/exam-room.controller.ts:19-38`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L19-L38)), `HeartbeatBody` and `SubmitBody` define `answers` with only `questionNumber`, `selectedOption`, `isFlagged`, and `answeredAt`, omitting `selectedStatements` and `numericValue`.
+  5. In `ExamLockService` ([`apps/api/src/modules/exam-room/exam-lock.service.ts:18-25`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-lock.service.ts#L18-L25)), `StoredAnswer` includes `selectedStatements` and `numericValue`, and the service serializes incoming answer objects into Redis hash `exam_answers:{attemptId}` via `JSON.stringify()`. Redis holds these fields in volatile cache.
+  6. In `ExamRoomService.heartbeat` ([`apps/api/src/modules/exam-room/exam-room.service.ts:569`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L569)), the service triggers `this.persistAnswers(attemptId, answers).catch(() => {})` in the background without `await`.
+  7. In `persistAnswers` ([`apps/api/src/modules/exam-room/exam-room.service.ts:807-835`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L807-L835)), the upsert logic passes only `attemptId`, `questionNumber`, `selectedOption`, `isFlagged`, and `answeredAt`. It does not attempt to write `selectedStatements` or `numericValue`, because the database model `AttemptAnswer` in [`packages/database/prisma/schema.prisma:234-246`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246) only defines `selectedOption Int?`. The implementation drops these fields before persistence. (Prisma does not throw a runtime field rejection because the implementation never attempts to supply those fields to Prisma).
+  8. When the candidate refreshes `/exam/[id]/summary` or when `initRoom` / `getMergedAnswers` runs ([`exam-room.service.ts:377-393, 631-647`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L377-L393)), the code queries `AttemptAnswer` from PostgreSQL and merges them with Redis `getStoredAnswers`. While the retrieval code optimistically looks for `ans.selectedStatements` and `ans.numericValue` on database rows, those fields are always `undefined` from PostgreSQL.
+  9. If Redis restarts, evicts keys, or when grading queries PostgreSQL `AttemptAnswer` directly, all Stage 2 statement evaluations and numeric values are permanently absent from PostgreSQL, changing computed scores and displayed answer correctness.
 * **Expected vs Actual Behavior:**
-  * *Expected:* All answer types (MCQ, 5-statement T/F `ص / غ`, numeric 0-99) must be durably persisted to PostgreSQL atomically before confirming autosave.
-  * *Actual:* Stage 2 answers exist only in volatile Redis hashes and are dropped by the database schema.
+  * *Expected:* All supported answer types (MCQ `selectedOption`, 5-statement evaluations `selectedStatements`, and numeric calculations `numericValue` per PRD 5.3.4) must be durably persisted to PostgreSQL atomically before confirming autosave.
+  * *Actual:* Stage 2 answers exist only in volatile Redis hashes and are dropped prior to database persistence because DTOs, schemas, and persistence mapping omit them.
 * **Evidence & Exact References:**
-  * [`packages/database/prisma/schema.prisma:234-246`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246): Missing `selectedStatements` and `numericValue` columns.
-  * [`apps/api/src/modules/exam-room/exam-room.service.ts:569`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L569): Unawaited fire-and-forget save in `heartbeat`.
-  * [`apps/api/src/modules/exam-room/exam-room.service.ts:618-650`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L618-L650): `getMergedAnswers` relying on volatile Redis.
-* **Confirmed Root Cause:** Severe discrepancy between the PRD Stage 2 domain specification and the physical Prisma database schema, compounded by unawaited asynchronous persistence.
+  * [`packages/database/prisma/schema.prisma:234-246`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246): Missing `selectedStatements` and `numericValue` columns on `AttemptAnswer`.
+  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:19-38`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L19-L38): `HeartbeatBody` and `SubmitBody` omit `selectedStatements` and `numericValue`.
+  * [`apps/api/src/modules/exam-room/exam-room.service.ts:807-835`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L807-L835): `persistAnswers` drops statement and numeric fields from upsert payload.
+  * [`apps/api/src/modules/exam-room/exam-room.service.ts:569`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L569): Unawaited persistence in `heartbeat`.
+  * [`apps/api/src/modules/exam-room/exam-room.service.ts:377-384, 631-638`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L377-L384): Retrieval code optimistically expecting `selectedStatements` and `numericValue` on database entities.
+* **Confirmed Root Cause:** Incomplete domain mapping across the full answer lifecycle (controller DTOs, Prisma schema, and service upsert mapping omit Stage 2 analytical propositions and numeric values, while retrieval code expects them), compounded by unawaited asynchronous persistence in `heartbeat`.
 * **Data-Integrity / Security Risk:** Critical data loss; candidate Olympiad scores and answers are permanently corrupted upon Redis eviction.
 * **PRD/Documentation Requirements:** PRD 5.3.4 (Stage 2 Question Types), PRD 5.3.5 (Answer Persistence), `hardcoded-and-mock-data.md` Section 1.1.
 * **User Clarification Required:** No. Strict architectural defect.
@@ -422,7 +426,7 @@ flowchart TD
     end
 
     subgraph Cluster2["Cluster 2: Unsafe Identity & Fallback Resolution"]
-        C2A["Missing AuthGuard on Exam Room endpoints"] --> C2B["resolveUser falls back to first DB user"]
+        C2A["Controller passes demo_user fallback & resolveUser queries findFirst()"] --> C2B["resolveUser binds session to first DB user"]
         C2B --> F02["F-02: Participation Link claims already participated"]
         C2C["Shared Profile table with forced student fields"] --> F10["F-10: Admin role assigned Grade 10"]
     end
@@ -458,7 +462,7 @@ flowchart TD
 * **Execution Path 1: Participant Participation Link Failure**
   `User clicks /exam/campbell-pilot/room`  
   → `Web requests GET /api/exam-room/campbell-pilot/init`  
-  → `ExamRoomController passes user?.id || 'demo_user'` (no guard)  
+  → `ExamRoomController passes user?.id || 'demo_user' default fallback`  
   → `ExamRoomService.resolveUser('demo_user')` falls back to `findFirst()` in PostgreSQL  
   → Returns first seeded user's attempt record (`status = 'submitted'`)  
   → Web renders post-exam completion state rather than exam lobby.
@@ -468,7 +472,7 @@ flowchart TD
   → `Heartbeat sends answers to /api/exam-room/:id/heartbeat`  
   → `Redis stores payload in HSET answers:attemptId`  
   → `persistAnswers runs in background without await`  
-  → `Prisma AttemptAnswer model rejects selectedStatements & numericValue (columns do not exist)`  
+  → `persistAnswers drops selectedStatements & numericValue (columns do not exist in schema.prisma or upsert call)`  
   → `Candidate refreshes /exam/:id/summary`  
   → `getMergedAnswers queries PostgreSQL; statements & numeric data are missing`  
   → Displayed scores and marked answers change or vanish.
@@ -499,10 +503,12 @@ flowchart TD
 * **Relevant Files:**
   * [`packages/database/prisma/schema.prisma:234-246`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/schema.prisma#L234-L246)
   * [`packages/database/prisma/migrations/`](file:///Users/matinmousavi/Desktop/Condorlab/packages/database/prisma/migrations/)
+  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:19-38`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L19-L38)
   * [`apps/api/src/modules/exam-room/exam-room.service.ts:807-835`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L807-L835)
 * **Intended Behavior & Constraints:**
-  * Add `selectedStatements Json? @map("selected_statements")` (for boolean True/False `ص / غ` statements) and `numericValue Int? @map("numeric_value")` (for 0-99 numerical calculations) to `AttemptAnswer`.
-  * Update `persistAnswers` upsert logic to save `selectedStatements` and `numericValue` alongside `selectedOption`.
+  * Add `selectedStatements Json? @map("selected_statements")` (for boolean True/False `ص / غ` statements) and `numericValue Int? @map("numeric_value")` (for 0-99 numerical calculations) to `AttemptAnswer` in `schema.prisma`.
+  * Update `HeartbeatBody` and `SubmitBody` request interfaces in `exam-room.controller.ts` to include `selectedStatements?: Record<number, boolean | null> | null` and `numericValue?: number | null`.
+  * Update `persistAnswers` upsert logic in `exam-room.service.ts` to map and save `selectedStatements` and `numericValue` alongside `selectedOption` in both `create` and `update` clauses.
 * **Prerequisites & Dependencies:** Requires Prisma migration authorization (see Section 11, Question 3).
 * **Risks & Rollback:** Safe additive column migration; backward compatible with existing pilot attempts.
 * **Required Tests:**
@@ -537,18 +543,21 @@ flowchart TD
 
 ### Phase 2: Security, Authentication & Routing Alignment (Priority: P0)
 
-#### Task 2.1: Enforce Strict Guard on Exam Room & Eradicate `resolveUser` Fallback
+#### Task 2.1: Eliminate `resolveUser` Fallback & Enforce Strict Authenticated Identity in Exam Room
 * **Task ID:** `TASK-AUTH-01`
 * **Status:** Proposed Remediation (Implementation Pending User Approval)
 * **Findings Addressed:** F-02
 * **Relevant Files:**
-  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:60-88`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L60-L88)
-  * [`apps/api/src/modules/exam-room/exam-room.service.ts:884-919`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L919)
+  * [`apps/api/src/modules/exam-room/exam-room.controller.ts:41, 60-158`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L41)
+  * [`apps/api/src/modules/exam-room/exam-room.service.ts:884-925`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L925)
 * **Intended Behavior:**
-  * Attach `@UseGuards(AuthGuard)` to all private exam room endpoints (`:identifier/init`, `:identifier/start`, `:attemptId/heartbeat`, etc.).
-  * Remove `findFirst()` and automatic user creation from `resolveUser`. If `userId` is not a valid authenticated UUID, throw `UnauthorizedException`.
+  * Retain existing class-level `@UseGuards(AuthGuard)` on `ExamRoomController` ([`exam-room.controller.ts:41`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.controller.ts#L41)).
+  * Remove permissive fallback literals (`user?.id || 'demo_user'`, `user?.sessionId || 'sess_demo'`) from controller method invocations; rely strictly on authenticated `CurrentUser()`.
+  * In `resolveUser` ([`exam-room.service.ts:884-919`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L884-L919)), remove `findFirst()` and automatic mock user creation. If `userId` is not a valid authenticated UUID or does not exist in the database, throw `UnauthorizedException`.
+  * In `isUserEnrolledInExam` ([`exam-room.service.ts:923-925`](file:///Users/matinmousavi/Desktop/Condorlab/apps/api/src/modules/exam-room/exam-room.service.ts#L923-L925)), remove the non-UUID bypass `if (!this.isUuid(userId)) return true;`.
 * **Acceptance Criteria:**
-  * An unauthenticated user clicking an exam link is redirected to `/login?redirect=...`.
+  * Unauthenticated requests to exam-room endpoints are rejected with HTTP 401 Unauthorized by `AuthGuard`.
+  * Authenticated requests with unresolvable or non-UUID user context are rejected with HTTP 401 Unauthorized; requests never fall back to an arbitrary database user.
   * No user can access or view another candidate's attempt status or answers.
 
 #### Task 2.2: Harmonize Exam Routing Architecture with Documented Sitemap (Preserving Route URLs)
@@ -909,14 +918,11 @@ Per the user's instructions, `AGENTS.md` must not be directly edited during this
 
 ## 10. Mandatory Naming Freeze — Operational Constraint
 
-> [!CAUTION]
-> **Mandatory Naming Freeze Enforced (No Renaming Permitted):**  
-> All existing project naming—including Persian product labels («اتاق آزمون», «لابی آزمون», «پاسخ‌برگ», «کارنامه»), application routes (`/room`, `/exams`, etc.), API endpoints, component identifiers, function and variable names, database models, and schema fields—is strictly frozen and must remain unchanged.  
-> 
-> **Status:** **NO RENAMING AUTHORIZED OR IMPLEMENTED.**  
-> - All speculative naming alternatives, rebranding proposals, and comparison tables have been completely removed from this plan.
-> - No naming cleanup, terminology standardization, broad find-and-replace operations, or opportunistic renaming of user-facing or internal identifiers will be performed.
-> - **Technical Remediation Distinction:** Genuine technical modifications to schemas (such as adding `selectedStatements` and `numericValue` to `AttemptAnswer` to fix critical data-loss defect F-06) or API contracts are classified strictly as technical bug remediations—not renaming—and require explicit user authorization prior to implementation.
+> [!IMPORTANT]
+> **Operational Rule: Existing Names Must Be Preserved — No Renaming Authorized**
+>
+> 1. **Zero Renaming Scope:** No proposed renaming of product labels, user interface text, routes, files, folders, functions, variables, models, database fields, or API identifiers is approved or permitted. All existing names are strictly preserved.
+> 2. **Technical Remediation Distinction:** This restriction does not prohibit necessary technical modifications to database schemas, API contracts, internal models, or backend resolution logic when genuinely required to fix a verified defect (such as adding `selectedStatements` and `numericValue` to `AttemptAnswer` to fix critical data-loss defect F-06). Such changes must be described and executed strictly as technical remediation—not renaming—and require explicit user authorization prior to implementation.
 
 ---
 
@@ -958,13 +964,13 @@ The following four material decisions cannot be resolved from existing documenta
 
 ---
 
-### Decision 4: Exam Routing Reconciliation Preserving Route URLs
-* **Problem Addressed:** Finding F-03. `docs/CONDORLAB_SITEMAP_FA.md:36-41` specifies `/exam/[attemptId]` and `/results/[attemptId]`, whereas the codebase contains `/exams/[slug]/room` and `/exam/[id]/room` with polymorphic identifier resolution.
-* **Viable Options:**
-  * **Option A (Recommended):** Retain all existing URL paths (`/exams/[slug]/room`, `/exam/[id]/room`, `/exam/[id]/summary`) without renaming, deprecating, or redirecting them (conforming to the mandatory naming freeze). Reconcile attempt identity internally on the server by authoritatively resolving the authenticated user's attempt record from the exam slug/UUID.
-  * **Option B (Route Renaming to Sitemap):** Rename or alias existing routes to force exact sitemap match (Prohibited by the mandatory naming freeze).
-* **Principal Trade-offs & Dependencies:** Option A eliminates identifier ambiguity without breaking existing links, bookmarks, or tests. Option B violates the mandatory naming freeze and risks regression.
-* **Recommendation:** **Option A (Server-side resolution preserving existing routes).**
+### Decision 4: Server-Side Attempt Resolution Under Preserved Routes
+* **Problem Addressed:** Finding F-03. The codebase contains routes `/exams/[slug]/room`, `/exam/[id]/room`, and `/exam/[id]/summary` where `[id]` is polymorphic (sometimes interpreted as exam slug, sometimes as exam ID, sometimes as attempt ID). Under the mandatory naming freeze, these route URLs cannot be renamed, deprecated, or redirected.
+* **Proposed Technical Remediation:**
+  * Retain all existing URL paths (`/exams/[slug]/room`, `/exam/[id]/room`, `/exam/[id]/summary`) without renaming, deprecating, or redirecting them.
+  * Reconcile attempt identity internally on the server: when a candidate requests `/exams/[slug]/room` or `/exam/[id]/room`, the backend authoritatively looks up or initializes the candidate's attempt from `(examId, authenticatedUserId)` in session context, rather than relying on ambiguous client-side parameter polymorphism.
+* **Principal Trade-offs & Dependencies:** Resolves identifier ambiguity and session locking cleanly on the server while preserving 100% of existing client routes, bookmarks, and tests without URL disruption.
+* **Recommendation:** Authorize server-side attempt resolution while strictly preserving existing route URLs.
 * **Approval Status:** **[PROPOSED RECOMMENDATION — NOT APPROVED; REQUIRES USER DECISION]**.
 
 ---
@@ -975,8 +981,11 @@ The following four material decisions cannot be resolved from existing documenta
 
 > [!IMPORTANT]
 > **Plan Status: READY FOR USER REVIEW.**  
-> **Implementation Status: PAUSED / PENDING PREREQUISITES & EXPLICIT USER APPROVAL.**  
-> This planning document is internally consistent, evidence-based, and complete for an informed go/no-go decision. It does **not** claim to be "execution-ready" for immediate coding because material architectural decisions and development gate authorization remain pending user review.
+> **Implementation Status: PROPOSED / PAUSED (Pending Explicit User Approval and G1 Prerequisites).**  
+> This planning document is internally consistent, evidence-based, and complete for an informed go/no-go decision. It does **not** authorize immediate implementation.
+> 
+> **Clarification on Repository History vs Plan Implementation:**  
+> The repository already contains substantial application code and historical Git commits reflecting past feature and fix attempts. However, repository changes already present in Git history do not prove that the remediation phases defined in this plan have been executed or verified. (For example, defects F-06, F-02, F-04, and F-08 remain demonstrably present in the active codebase). Conversely, this plan does not claim that the repository has had no historical implementation work; rather, the *prioritized remediation phases detailed in this document (Phases 1–4)* have not been executed, and all implementation work remains paused awaiting explicit user authorization.
 
 ### 12.2 Prerequisites Required Before Implementation May Begin
 
@@ -985,7 +994,7 @@ The following four material decisions cannot be resolved from existing documenta
    - Readiness timeout deadline (Option B: 60s recommended).
    - Profile modeling (Option A: nullable fields in existing table recommended).
    - G1 sprint authorization (Option A: authorize Phase 1–4 remediation sprint).
-   - Route reconciliation (Option A: internal server resolution preserving URLs).
+   - Route reconciliation (Server-side attempt resolution preserving existing route URLs).
 3. **Formal G1 Sprint Authorization:** Formal signoff authorizing the Prisma database schema update for `AttemptAnswer` (Task 1.1).
 4. **Implementation Authorization:** A separate, explicit user command directing the implementation agent to begin code changes.
 
@@ -994,7 +1003,7 @@ The following four material decisions cannot be resolved from existing documenta
 Prior to concluding this task, the workspace was audited against all change restrictions:
 
 1. **Deliverable Singularity:** [`plans.md`](file:///Users/matinmousavi/Desktop/Condorlab/plans.md) is the **sole modified file** in the repository.
-2. **Zero Code Modifications:** No application code in `apps/api` or `apps/web`, no Prisma schemas or migrations, no configuration files, no docs, and no `AGENTS.md` were altered.
+2. **Zero Code Modifications in This Session:** No application code in `apps/api` or `apps/web`, no Prisma schemas or migrations, no configuration files, no docs, and no `AGENTS.md` were altered during this planning task.
 3. **Naming Freeze Compliance:** Zero proposed renamings have been approved or applied. All existing product labels, UI terms, routes, and database models remain unchanged.
 4. **Verified Automated Test Baseline:** Executed `node --test tests/*.test.mjs` during this audit: **26/26 tests passed in ~73ms** (verifying in-memory unit specification helpers; live database, Redis, and Playwright E2E suites remain documented verification gaps).
-5. **No Implementation Started:** No remediation task has been started, partially implemented, or executed. All work remains paused awaiting user decision.
+5. **Remediation Implementation Paused:** No remediation tasks from Phases 1 through 4 have been started or partially implemented in this session. The working tree is clean on `main` (aside from the permitted `plans.md` update), and execution remains strictly paused awaiting explicit user authorization.
