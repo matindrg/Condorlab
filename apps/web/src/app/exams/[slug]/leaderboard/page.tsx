@@ -156,11 +156,11 @@ export default function ExamLeaderboardPage() {
 
       {/* محتوای اصلی و جدول */}
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-8">
-        {/* فیلتر پایه تحصیلی (فکت عمومی R-66) */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        {/* فیلتر پایه تحصیلی (فکت عمومی R-66) - استیکی با ترنسپرنسی و بلور بدون گلیچ مشکی */}
+        <div className="sticky top-16 z-30 bg-[#0E0F12]/85 backdrop-blur-md border-b border-white/10 py-3.5 px-3 sm:px-4 -mx-3 sm:-mx-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 mb-6 transition-all shadow-md shadow-black/20">
           <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
             <span className="text-xs text-gray-400 flex items-center gap-1.5 pl-2">
-              <Filter className="w-3.5 h-3.5 text-gray-500" />
+              <Filter className="w-3.5 h-3.5 text-gray-400" />
               پایه:
             </span>
             {gradeOptions.map((opt) => (

@@ -20,6 +20,8 @@ export class ExamsService {
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
       endTime: new Date(Date.now() + 6 * 24 * 3600 * 1000).toISOString(),
+      windowStartTime: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
+      windowEndTime: new Date(Date.now() + 6 * 24 * 3600 * 1000).toISOString(),
       durationMinutes: 120,
       totalQuestions: 60,
       price: 0, // رایگان برای پایلوت ۱
@@ -37,6 +39,8 @@ export class ExamsService {
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
       endTime: new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString(),
+      windowStartTime: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
+      windowEndTime: new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString(),
       durationMinutes: 150,
       totalQuestions: 75,
       price: 180000,
@@ -54,6 +58,8 @@ export class ExamsService {
       status: ExamStatus.Published,
       startTime: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString(),
       endTime: new Date(Date.now() + 26 * 24 * 3600 * 1000).toISOString(),
+      windowStartTime: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString(),
+      windowEndTime: new Date(Date.now() + 26 * 24 * 3600 * 1000).toISOString(),
       durationMinutes: 90,
       totalQuestions: 40,
       price: 220000,
@@ -71,6 +77,8 @@ export class ExamsService {
       status: ExamStatus.Closed,
       startTime: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
       endTime: new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString(),
+      windowStartTime: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+      windowEndTime: new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString(),
       durationMinutes: 90,
       totalQuestions: 60,
       price: 50000,
@@ -88,6 +96,8 @@ export class ExamsService {
       status: ExamStatus.Published,
       startTime: new Date().toISOString(),
       endTime: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      windowStartTime: new Date().toISOString(),
+      windowEndTime: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
       durationMinutes: 1,
       totalQuestions: 5,
       price: 0,
@@ -194,12 +204,39 @@ export class ExamsService {
     }
 
     if (userId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
       const enrolledIds = await this.getUserEnrolledExamIds(userId);
       const enrolledSet = new Set(enrolledIds);
-      filtered = filtered.map((exam) => ({
-        ...exam,
-        isEnrolled: enrolledSet.has(exam.id) || (exam.slug ? enrolledSet.has(exam.slug) : false),
-      }));
+
+      const attemptsMap = new Map<string, { id: string; status: string }>();
+
+      if (isUuid) {
+        try {
+          const attempts = await this.prisma.client.attempt.findMany({
+            where: { userId },
+            select: { id: true, examId: true, status: true, exam: { select: { slug: true } } },
+          });
+          attempts.forEach((att) => {
+            if (att.examId) attemptsMap.set(att.examId, { id: att.id, status: att.status });
+            if (att.exam?.slug) attemptsMap.set(att.exam.slug, { id: att.id, status: att.status });
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      filtered = filtered.map((exam) => {
+        const att = attemptsMap.get(exam.id) || (exam.slug ? attemptsMap.get(exam.slug) : undefined);
+        const isUserEnrolled = enrolledSet.has(exam.id) || (exam.slug ? enrolledSet.has(exam.slug) : false) || Boolean(att);
+        const attemptStatus = att?.status || (isUserEnrolled ? 'not_started' : null);
+
+        return {
+          ...exam,
+          isEnrolled: isUserEnrolled,
+          attemptStatus,
+          attemptId: att?.id,
+        };
+      });
     }
 
     return filtered;
@@ -273,13 +310,21 @@ export class ExamsService {
             attemptId = attempt.id;
             isEnrolled = true;
 
+            const windowEndMs = exam.endTime ? new Date(exam.endTime).getTime() : Infinity;
+            const now = Date.now();
+
             if (attempt.status === 'not_started') {
-              examState = 'NOT_STARTED';
+              if (now >= windowEndMs) {
+                examState = 'EXPIRED' as any;
+              } else {
+                examState = 'NOT_STARTED';
+              }
             } else if (attempt.status === 'in_progress') {
               const durationMinutes = exam.durationMinutes || 120;
-              const startedAtMs = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
-              const expiryMs = startedAtMs + durationMinutes * 60 * 1000;
-              const remainingSeconds = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+              const startedAtMs = attempt.startedAt ? new Date(attempt.startedAt).getTime() : now;
+              const userExpiryMs = startedAtMs + durationMinutes * 60 * 1000;
+              const effectiveExpiryMs = Math.min(userExpiryMs, windowEndMs);
+              const remainingSeconds = Math.max(0, Math.floor((effectiveExpiryMs - now) / 1000));
               if (remainingSeconds <= 0) {
                 examState = 'SUBMITTED';
               } else {
@@ -291,6 +336,8 @@ export class ExamsService {
               } else {
                 examState = 'SUBMITTED';
               }
+            } else if (attempt.status === 'expired') {
+              examState = 'EXPIRED' as any;
             }
           } else if (isEnrolled) {
             examState = 'NOT_STARTED';
@@ -329,6 +376,8 @@ export class ExamsService {
       status: e.status as ExamStatus,
       startTime: e.startTime.toISOString(),
       endTime: e.endTime.toISOString(),
+      windowStartTime: e.startTime.toISOString(),
+      windowEndTime: e.endTime.toISOString(),
       durationMinutes: e.durationMinutes,
       totalQuestions: 60,
       price: e.price,

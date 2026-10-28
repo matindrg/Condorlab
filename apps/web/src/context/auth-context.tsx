@@ -7,6 +7,7 @@ interface AuthContextType {
   user: any | null;
   enrolledExamIds: string[];
   isLoading: boolean;
+  isMounted: boolean;
   isEnrolled: (examIdOrSlug: string) => boolean;
   markExamAsEnrolled: (examIdOrSlug: string) => void;
   refreshAuth: () => Promise<void>;
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   enrolledExamIds: [],
   isLoading: true,
+  isMounted: false,
   isEnrolled: () => false,
   markExamAsEnrolled: () => {},
   refreshAuth: async () => {},
@@ -27,40 +29,11 @@ const STORAGE_USER_KEY = 'condor_user';
 const STORAGE_ENROLLED_KEY = 'condor_enrolled_exams';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem(STORAGE_USER_KEY);
-        return cached ? JSON.parse(cached) : null;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
-
-  const [enrolledExamIds, setEnrolledExamIds] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem(STORAGE_ENROLLED_KEY);
-        return cached ? JSON.parse(cached) : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        return !localStorage.getItem(STORAGE_USER_KEY);
-      } catch {
-        return true;
-      }
-    }
-    return true;
-  });
+  // مقداردهی اولیه یکسان در کلاینت و سرور جهت جلوگیری قطعی از خطای SSR Hydration Mismatch
+  const [user, setUser] = useState<any | null>(null);
+  const [enrolledExamIds, setEnrolledExamIds] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isMounted, setIsMounted] = useState<boolean>(false);
 
   const refreshAuth = useCallback(async () => {
     try {
@@ -103,6 +76,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    setIsMounted(true);
+
+    try {
+      const cachedUser = localStorage.getItem(STORAGE_USER_KEY);
+      if (cachedUser) {
+        setUser(JSON.parse(cachedUser));
+      }
+      const cachedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY);
+      if (cachedEnrolled) {
+        setEnrolledExamIds(JSON.parse(cachedEnrolled));
+      }
+    } catch {}
+
     refreshAuth();
 
     const handleAuthChange = () => {
@@ -171,6 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         enrolledExamIds,
         isLoading,
+        isMounted,
         isEnrolled,
         markExamAsEnrolled,
         refreshAuth,

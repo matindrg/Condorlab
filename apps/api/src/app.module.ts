@@ -8,6 +8,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ExamRoomModule } from './modules/exam-room/exam-room.module';
 import { GradingModule } from './modules/grading/grading.module';
 import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
     ExamRoomModule,
     GradingModule,
     LeaderboardModule,
+    AdminModule,
   ],
   controllers: [],
   providers: [],

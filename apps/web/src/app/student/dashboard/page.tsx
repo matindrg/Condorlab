@@ -1,10 +1,11 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/auth-context';
+import { useAppCache, PurchasedProduct, UserProfile } from '@/context/app-cache-context';
 import { INITIAL_CATALOG_EXAMS } from '@/lib/catalog';
 import { formatGrade } from '@condorlab/shared';
 import {
@@ -29,81 +30,200 @@ import {
   HelpCircle,
   ExternalLink,
   Laptop,
+  FileCheck2,
 } from 'lucide-react';
 
-interface PurchasedProduct {
-  id: string;
-  title: string;
-  slug: string;
-  type: string;
-  orderNumber: string;
-  price: number;
-  payableAmount: number;
-  status: string;
-  accessType: string;
-  purchasedAt: string;
-  durationMinutes: number;
-  totalQuestions: number;
-  campbellVolumes?: number[];
-  startTime?: string;
-  endTime?: string;
-  remainingSeconds?: number;
-  isLiveActive?: boolean;
-  startedAt?: string;
-  submittedAt?: string;
-  isSessionLocked?: boolean;
-  lockedDeviceId?: string;
-  lockedAt?: string;
-  lastHeartbeatAt?: string;
+interface ExamCardState {
+  state: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  statusBadge: { text: string; className: string };
+  ctaButton: { text: string; href: string; className: string } | null;
+  waitingBadge?: { text: string; className: string };
+  windowText: string;
 }
 
-interface UserProfile {
-  firstName: string;
-  lastName: string;
-  fullName: string;
-  phoneNumber: string;
-  grade: string;
-  school: string;
-  city: string;
-  email?: string;
-  role?: string;
-  createdAt?: string;
+function getExamCardState(item: PurchasedProduct): ExamCardState {
+  const now = Date.now();
+  const startTime = item.startTime ? new Date(item.startTime).getTime() : null;
+  const endTime = item.endTime ? new Date(item.endTime).getTime() : null;
+
+  const isBefore = startTime ? now < startTime : false;
+  const isAfter = endTime ? now > endTime : false;
+  const isDuring = !isBefore && !isAfter;
+
+  const hasParticipated =
+    item.status === 'in_progress' ||
+    item.status === 'submitted' ||
+    item.status === 'completed' ||
+    item.status === 'expired' ||
+    item.status === 'missed';
+  const isSubmitted =
+    item.status === 'submitted' ||
+    item.status === 'completed' ||
+    (item.remainingSeconds !== undefined && item.remainingSeconds <= 0);
+  const isInProgress = item.status === 'in_progress';
+  const isReportPublished = (item as any).isReportPublished === true;
+
+  const startFmt = startTime
+    ? new Date(startTime).toLocaleString('fa-IR', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'اعلام خواهد شد';
+  const endFmt = endTime
+    ? new Date(endTime).toLocaleString('fa-IR', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'اعلام خواهد شد';
+  const windowText = `بازه برگزاری: ${startFmt} تا ${endFmt}`;
+
+  // ۱. قبل از شروع بازه رسمی: فقط بج، بدون دکمه ورود به لابی (Rule C.1)
+  if (isBefore) {
+    return {
+      state: 1,
+      windowText,
+      statusBadge: {
+        text: `شروع در ${startFmt}`,
+        className: 'bg-[#FFCC00]/15 text-[#FFCC00] border border-[#FFCC00]/30',
+      },
+      ctaButton: null,
+    };
+  }
+
+  // ۲. در بازه رسمی (شروع‌نشده): ورود به لابی آزمون / شروع آزمون (Rule C.2)
+  if (isDuring && !hasParticipated) {
+    return {
+      state: 2,
+      windowText,
+      statusBadge: {
+        text: 'آماده شروع',
+        className: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+      },
+      ctaButton: {
+        text: 'ورود به لابی آزمون / شروع آزمون',
+        href: `/exam/${item.slug}/room`,
+        className: 'bg-[#FFCC00] hover:bg-[#FFD633] text-black font-black text-xs shadow-md shadow-[#FFCC00]/15',
+      },
+    };
+  }
+
+  // ۳. در بازه رسمی (در حال برگزاری): بازگشت به اتاق آزمون (Rule C.3)
+  if (isDuring && isInProgress) {
+    return {
+      state: 3,
+      windowText,
+      statusBadge: {
+        text: 'در حال برگزاری و شرکت',
+        className: 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse',
+      },
+      ctaButton: {
+        text: 'بازگشت به اتاق آزمون',
+        href: `/exam/${item.slug}/room`,
+        className: 'bg-amber-500 hover:bg-amber-400 text-black font-black text-xs shadow-lg shadow-amber-500/20 animate-pulse',
+      },
+    };
+  }
+
+  // ۴. کاربر شرکت کرده و ارسال شده، ولی هنوز کارنامه منتشر نشده: مشاهده خلاصه پاسخبرگ (Rule C.4)
+  if (isSubmitted && !isReportPublished) {
+    return {
+      state: 4,
+      windowText,
+      statusBadge: {
+        text: 'آزمون پایان‌یافته و ثبت شد',
+        className: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+      },
+      waitingBadge: {
+        text: 'در انتظار انتشار کارنامه',
+        className: 'bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]',
+      },
+      ctaButton: {
+        text: 'مشاهده خلاصه پاسخ‌برگ',
+        href: `/exam/${item.slug}/summary`,
+        className: 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20',
+      },
+    };
+  }
+
+  // ۵. کاربر شرکت کرده، مهلت تمام شده و کارنامه و پاسخنامه منتشر شده: مشاهده کارنامه و پاسخنامه (Rule C.5)
+  if (isSubmitted && isReportPublished) {
+    return {
+      state: 5,
+      windowText,
+      statusBadge: {
+        text: 'کارنامه صادر شد',
+        className: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+      },
+      ctaButton: {
+        text: 'مشاهده کارنامه و پاسخنامه تشریحی',
+        href: `/student/report-card?attemptId=${item.id}&slug=${item.slug}`,
+        className: 'bg-[#FFCC00] hover:bg-[#FFD633] text-black font-black text-xs shadow-lg shadow-[#FFCC00]/20',
+      },
+    };
+  }
+
+  // ۶. بعد از پایان بازه، داوطلب شرکت نکرده و کارنامه/پاسخنامه هم هنوز منتشر نشده: فقط بج مات بدون دکمه (Rule C.6)
+  if (isAfter && !hasParticipated && !isReportPublished) {
+    return {
+      state: 6,
+      windowText,
+      statusBadge: {
+        text: 'غایب — آزمون پایان یافته',
+        className: 'bg-rose-500/15 text-rose-400 border border-rose-500/30',
+      },
+      ctaButton: null,
+    };
+  }
+
+  // ۷. بعد از پایان بازه، داوطلب شرکت نکرده ولی پاسخنامه تشریحی منتشر شده: مشاهده دفترچه و پاسخنامه (Rule C.7)
+  if (isAfter && !hasParticipated && isReportPublished) {
+    return {
+      state: 7,
+      windowText,
+      statusBadge: {
+        text: 'غایب — آزمون پایان یافته',
+        className: 'bg-gray-500/15 text-gray-400 border border-gray-500/30',
+      },
+      ctaButton: {
+        text: 'مشاهده دفترچه و پاسخنامه تشریحی',
+        href: `/exams/${item.slug}/solutions`,
+        className: 'bg-white/10 hover:bg-white/15 text-gray-200 font-bold text-xs border border-white/10',
+      },
+    };
+  }
+
+  // فال‌بک پیش‌فرض
+  return {
+    state: 2,
+    windowText,
+    statusBadge: {
+      text: 'آماده شروع',
+      className: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+    },
+    ctaButton: {
+      text: 'ورود به لابی آزمون / شروع آزمون',
+      href: `/exam/${item.slug}/room`,
+      className: 'bg-[#FFCC00] hover:bg-[#FFD633] text-black font-black text-xs shadow-md shadow-[#FFCC00]/15',
+    },
+  };
 }
 
 export default function StudentDashboardPage() {
   const router = useRouter();
   const { user: authUser, enrolledExamIds, isLoading: authLoading, refreshAuth } = useAuth();
+  const {
+    profile,
+    purchasedProducts: products,
+    isLoading: cacheLoading,
+    refetchDashboard,
+    mutateProfile,
+  } = useAppCache();
 
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<UserProfile | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('condor_user');
-        if (cached) {
-          const u = JSON.parse(cached);
-          if (u?.profile) {
-            return {
-              firstName: u.profile.firstName || '',
-              lastName: u.profile.lastName || '',
-              fullName:
-                u.profile.fullName ||
-                `${u.profile.firstName || ''} ${u.profile.lastName || ''}`.trim() ||
-                'داوطلب المپیاد',
-              phoneNumber: u.profile.phoneNumber || '',
-              grade: u.profile.grade || '10',
-              school: u.profile.school || 'نامشخص',
-              city: u.profile.city || 'نامشخص',
-              email: u.email || '',
-              role: u.role || 'Student',
-              createdAt: u.createdAt,
-            };
-          }
-        }
-      } catch {}
-    }
-    return null;
-  });
-  const [products, setProducts] = useState<PurchasedProduct[]>([]);
+  const loading = cacheLoading && products.length === 0;
 
   // به‌روزرسانی عنوان تب مرورگر به صورت «پنل کاربری {نام کاربر} | کندرلب»
   useEffect(() => {
@@ -151,145 +271,6 @@ export default function StudentDashboardPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // واکشی داده‌های داشبورد از API
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/dashboard/overview', { cache: 'no-store' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          const u = json.data.user;
-          if (u) {
-            const userProf: UserProfile = {
-              firstName: u.profile?.firstName || authUser?.profile?.firstName || '',
-              lastName: u.profile?.lastName || authUser?.profile?.lastName || '',
-              fullName:
-                u.profile?.fullName ||
-                `${u.profile?.firstName || ''} ${u.profile?.lastName || ''}`.trim() ||
-                'داوطلب المپیاد',
-              phoneNumber: u.profile?.phoneNumber || authUser?.profile?.phoneNumber || '',
-              grade: u.profile?.grade || authUser?.profile?.grade || '10',
-              school: u.profile?.school || authUser?.profile?.school || 'نامشخص',
-              city: u.profile?.city || authUser?.profile?.city || 'نامشخص',
-              email: u.email || authUser?.email || '',
-              role: u.role || authUser?.role || 'Student',
-              createdAt: u.createdAt || authUser?.createdAt,
-            };
-            setProfile(userProf);
-          }
-
-          // دریافت قطعی محصولات خریداری‌شده از سرور دیتابیس
-          const fetchedProducts: PurchasedProduct[] = json.data.purchasedProducts || [];
-
-          // اطمینان از نمایش آزمون‌های ثبت‌نامی کاربر در صورت تأخیر همگام‌سازی دیتابیس یا وضعیت لوکال
-          if (Array.isArray(enrolledExamIds) && enrolledExamIds.length > 0) {
-            for (const enrolledId of enrolledExamIds) {
-              const alreadyExists = fetchedProducts.some(
-                (p) => p.id === enrolledId || p.slug === enrolledId,
-              );
-              if (!alreadyExists) {
-                const matchedExam = INITIAL_CATALOG_EXAMS.find(
-                  (e) => e.id === enrolledId || e.slug === enrolledId,
-                );
-                if (matchedExam) {
-                  fetchedProducts.push({
-                    id: matchedExam.id,
-                    title: matchedExam.title,
-                    slug: matchedExam.slug,
-                    type: matchedExam.category === 'stage2' ? 'شبیه‌ساز تخصصی مرحله ۲' : 'آزمون شبیه‌ساز',
-                    orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
-                    price: matchedExam.price,
-                    payableAmount: matchedExam.price,
-                    status: 'not_started',
-                    accessType: 'رسمی (با رتبه)',
-                    purchasedAt: new Date().toISOString(),
-                    durationMinutes: matchedExam.durationMinutes,
-                    totalQuestions: matchedExam.totalQuestions,
-                    campbellVolumes: matchedExam.campbellVolumes,
-                    startTime: matchedExam.startTime,
-                    endTime: matchedExam.endTime,
-                    remainingSeconds: matchedExam.durationMinutes * 60,
-                    isLiveActive: false,
-                    isSessionLocked: false,
-                  });
-                }
-              }
-            }
-          }
-
-          setProducts(fetchedProducts);
-          return;
-        }
-      }
-
-      // فال‌بک در صورت عدم احراز هویت سرور ولی وجود کش لوکال
-      if (authUser) {
-        setProfile({
-          firstName: authUser.profile?.firstName || '',
-          lastName: authUser.profile?.lastName || '',
-          fullName:
-            `${authUser.profile?.firstName || ''} ${authUser.profile?.lastName || ''}`.trim() ||
-            'داوطلب المپیاد',
-          phoneNumber: authUser.profile?.phoneNumber || '',
-          grade: authUser.profile?.grade || '10',
-          school: authUser.profile?.school || 'نامشخص',
-          city: authUser.profile?.city || 'نامشخص',
-          email: authUser.email || '',
-          role: authUser.role || 'Student',
-        });
-
-        // افزودن آزمون‌های خریداری‌شده از کاتالوگ
-        const localProducts: PurchasedProduct[] = [];
-        if (Array.isArray(enrolledExamIds)) {
-          for (const enrolledId of enrolledExamIds) {
-            const matchedExam = INITIAL_CATALOG_EXAMS.find(
-              (e) => e.id === enrolledId || e.slug === enrolledId,
-            );
-            if (matchedExam) {
-              localProducts.push({
-                id: matchedExam.id,
-                title: matchedExam.title,
-                slug: matchedExam.slug,
-                type: 'آزمون شبیه‌ساز',
-                orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
-                price: matchedExam.price,
-                payableAmount: matchedExam.price,
-                status: 'not_started',
-                accessType: 'رسمی (با رتبه)',
-                purchasedAt: new Date().toISOString(),
-                durationMinutes: matchedExam.durationMinutes,
-                totalQuestions: matchedExam.totalQuestions,
-                campbellVolumes: matchedExam.campbellVolumes,
-                startTime: matchedExam.startTime,
-                endTime: matchedExam.endTime,
-              });
-            }
-          }
-        }
-        setProducts(localProducts);
-      }
-    } catch (e) {
-      console.error('Failed to load dashboard overview:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [authUser, enrolledExamIds]);
-
-  useEffect(() => {
-    fetchDashboardData();
-
-    // همگام‌سازی منحصراً در صورت تغییر نشست احراز هویت (بدون رفرش مزاحم هنگام تعویض تب مرورگر)
-    const handleAuthChange = () => {
-      fetchDashboardData();
-    };
-
-    window.addEventListener('condor_auth_change', handleAuthChange);
-    return () => {
-      window.removeEventListener('condor_auth_change', handleAuthChange);
-    };
-  }, [fetchDashboardData]);
-
   // تنظیم مقادیر اولیه فرم ویرایش مشخصات
   const handleStartEdit = () => {
     if (profile) {
@@ -321,20 +302,15 @@ export default function StudentDashboardPage() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setProfile((prev) =>
-          prev
-            ? {
-                ...prev,
-                firstName: editForm.firstName,
-                lastName: editForm.lastName,
-                fullName: `${editForm.firstName} ${editForm.lastName}`.trim() || 'داوطلب المپیاد',
-                phoneNumber: editForm.phoneNumber,
-                grade: editForm.grade,
-                school: editForm.school || 'نامشخص',
-                city: editForm.city || 'نامشخص',
-              }
-            : null,
-        );
+        mutateProfile({
+          firstName: editForm.firstName,
+          lastName: editForm.lastName,
+          fullName: `${editForm.firstName} ${editForm.lastName}`.trim() || 'داوطلب المپیاد',
+          phoneNumber: editForm.phoneNumber,
+          grade: editForm.grade,
+          school: editForm.school || 'نامشخص',
+          city: editForm.city || 'نامشخص',
+        });
 
         // همگام‌سازی با کش کلاینت
         try {
@@ -355,6 +331,7 @@ export default function StudentDashboardPage() {
         } catch {}
 
         window.dispatchEvent(new Event('condor_auth_change'));
+        window.dispatchEvent(new CustomEvent('condor:invalidate:user'));
         await refreshAuth();
 
         setSaveMessage({ text: 'مشخصات شما با موفقیت ذخیره و به‌روزرسانی شد.', type: 'success' });
@@ -796,11 +773,9 @@ export default function StudentDashboardPage() {
             /* لیست کارت‌های محصولات خریداری‌شده با وضعیت‌های بصری تفکیک‌شده */
             <div className="space-y-4">
               {products.map((item) => {
-                const isLive = Boolean(
-                  item.isLiveActive ||
-                  (item.startedAt && item.status === 'in_progress' && (item.remainingSeconds === undefined || item.remainingSeconds > 0))
-                );
-                const isSubmitted = item.status === 'submitted' || Boolean(item.startedAt && item.remainingSeconds !== undefined && item.remainingSeconds <= 0);
+                const cardState = getExamCardState(item);
+                const isLive = cardState.state === 3;
+                const isSubmitted = cardState.state === 4 || cardState.state === 5;
 
                 return (
                   <div
@@ -810,12 +785,20 @@ export default function StudentDashboardPage() {
                         ? 'bg-gradient-to-br from-[#1F1C14] to-[#16171B] border-amber-500/70 shadow-amber-500/10'
                         : isSubmitted
                         ? 'bg-[#181818] border-emerald-500/30'
+                        : cardState.state === 6 || cardState.state === 7
+                        ? 'bg-[#141518] border-white/5 opacity-85'
                         : 'bg-[#181818] border-[#2E3340] hover:border-[#FFCC00]/50'
                     }`}
                   >
                     <div
                       className={`absolute top-0 right-0 w-2 h-full ${
-                        isLive ? 'bg-amber-500 animate-pulse' : isSubmitted ? 'bg-emerald-500' : 'bg-[#FFCC00]'
+                        isLive
+                          ? 'bg-amber-500 animate-pulse'
+                          : isSubmitted
+                          ? 'bg-emerald-500'
+                          : cardState.state === 6 || cardState.state === 7
+                          ? 'bg-gray-600'
+                          : 'bg-[#FFCC00]'
                       }`}
                     ></div>
 
@@ -826,21 +809,19 @@ export default function StudentDashboardPage() {
                             {item.type || 'آزمون شبیه‌ساز'}
                           </span>
 
-                          {/* وضعیت بصری داینامیک صندلی آزمون */}
-                          {isLive ? (
-                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
-                              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-                              در حال برگزاری و شرکت
-                            </span>
-                          ) : isSubmitted ? (
-                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3" />
-                              آزمون پایان‌یافته و ثبت شد
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3" />
-                              آماده شروع
+                          {/* بج وضعیت قطعی کارت بر اساس ماتریس ۷ وضعیتی Rule C */}
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1.5 ${cardState.statusBadge.className}`}
+                          >
+                            {cardState.statusBadge.text}
+                          </span>
+
+                          {/* بج تکمیلی در انتظار انتشار کارنامه در صورت لزوم */}
+                          {cardState.waitingBadge && (
+                            <span
+                              className={`px-2.5 py-0.5 rounded-md text-[10px] font-medium border flex items-center gap-1 ${cardState.waitingBadge.className}`}
+                            >
+                              {cardState.waitingBadge.text}
                             </span>
                           )}
 
@@ -883,34 +864,25 @@ export default function StudentDashboardPage() {
                       </div>
                     </div>
 
-                    {/* ویژگی‌های آزمون و زمان باقیمانده */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-3 border-t border-white/5 text-xs text-gray-300 pr-3 mb-4">
-                      {isLive && item.remainingSeconds !== undefined && item.remainingSeconds > 0 ? (
-                        <div className="flex items-center gap-1.5 text-amber-400 font-bold col-span-2 sm:col-span-1">
-                          <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                          <span>زمان باقیمانده: {Math.ceil(item.remainingSeconds / 60)} دقیقه</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-gray-500" />
-                          <span>مدت آزمون: {item.durationMinutes} دقیقه</span>
-                        </div>
-                      )}
+                    {/* ویژگی‌های آزمون و نمایش صریح بازه برگزاری آزمون (Rule C) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3 border-t border-white/5 text-xs text-gray-300 pr-3 mb-4">
+                      <div className="flex items-center gap-1.5 col-span-1 sm:col-span-1">
+                        <Clock className="w-3.5 h-3.5 text-gray-500" />
+                        <span>مدت آزمون: {item.durationMinutes} دقیقه</span>
+                      </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 col-span-1 sm:col-span-1">
                         <BookOpen className="w-3.5 h-3.5 text-gray-500" />
                         <span>{item.totalQuestions} سوال تحلیلی</span>
                       </div>
 
-                      {item.campbellVolumes && item.campbellVolumes.length > 0 && (
-                        <div className="flex items-center gap-1.5 col-span-2 sm:col-span-1">
-                          <GraduationCap className="w-3.5 h-3.5 text-[#FFCC00]" />
-                          <span>جلد کمپبل: {item.campbellVolumes.join(' و ')}</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5 col-span-1 sm:col-span-1 text-[#FFCC00]">
+                        <Calendar className="w-3.5 h-3.5 text-[#FFCC00]" />
+                        <span className="font-medium text-[11px]">{cardState.windowText}</span>
+                      </div>
                     </div>
 
-                    {/* دکمه‌های اکشن */}
+                    {/* دکمه‌های اکشن بر اساس ماتریس ۷ وضعیتی */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/5 pr-3">
                       <div className="flex flex-wrap items-center gap-2.5">
                         <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
@@ -934,39 +906,26 @@ export default function StudentDashboardPage() {
                           جزئیات
                         </Link>
 
-                        {isLive ? (
+                        {/* اکشن اختصاصی بر اساس ماتریس ۷ وضعیتی */}
+                        {cardState.ctaButton ? (
                           <Link
-                            href={`/exam/${item.slug}/room`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition-colors shadow-lg shadow-amber-500/20 animate-pulse"
+                            href={cardState.ctaButton.href}
+                            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl transition-all ${cardState.ctaButton.className}`}
                           >
-                            <span>بازگشت به اتاق آزمون (در حال برگزاری)</span>
+                            <span>{cardState.ctaButton.text}</span>
                             <ArrowLeft className="w-3.5 h-3.5" />
                           </Link>
-                        ) : item.status === 'graded' ? (
-                          <Link
-                            href={`/student/report-card?attemptId=${item.id}`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#FFD633] text-black font-black text-xs transition-colors shadow-lg shadow-[#FFCC00]/20"
-                          >
-                            <span>مشاهده کارنامه تحلیلی</span>
-                            <ArrowLeft className="w-3.5 h-3.5" />
-                          </Link>
-                        ) : isSubmitted ? (
-                          <Link
-                            href={`/exam/${item.slug}/room`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-md shadow-emerald-600/20"
-                          >
-                            <span>مشاهده خلاصه پاسخ‌برگ</span>
-                            <ArrowLeft className="w-3.5 h-3.5" />
-                          </Link>
-                        ) : (
-                          <Link
-                            href={`/exam/${item.slug}/room`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FFCC00] hover:bg-[#E6B800] text-black font-bold text-xs transition-colors shadow-md shadow-[#FFCC00]/15"
-                          >
-                            <span>شروع آزمون</span>
-                            <ArrowLeft className="w-3.5 h-3.5" />
-                          </Link>
-                        )}
+                        ) : cardState.state === 1 ? (
+                          /* حالت قبل از بازه: بدون دکمه ورود، فقط بج */
+                          <span className="px-3 py-1.5 rounded-xl bg-white/5 text-gray-400 text-xs font-medium border border-white/10">
+                            در انتظار شروع بازه آزمون
+                          </span>
+                        ) : cardState.state === 6 ? (
+                          /* حالت غایب بعد از پایان آزمون بدون کارنامه: بج مات خنثی */
+                          <span className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-400 text-xs font-medium border border-rose-500/20">
+                            غایب — آزمون پایان یافته
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

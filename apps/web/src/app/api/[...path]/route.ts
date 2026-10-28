@@ -133,7 +133,7 @@ async function proxyHandler(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        message: 'خطا در ارتباط با سرور کندرلب. لطفاً از فعال بودن سرویس API اطمینان حاصل فرمایید.',
+        message: 'خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.',
         error: err?.message,
       },
       { status: 503 }

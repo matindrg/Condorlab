@@ -82,6 +82,11 @@ function SignupForm() {
       return;
     }
 
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+      return;
+    }
+
     setIsLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -92,7 +97,17 @@ function SignupForm() {
 
       const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data?.success) {
+      if (!res.ok) {
+        if (res.status >= 500 || res.status === 408 || res.status === 502 || res.status === 503 || res.status === 504) {
+          setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+          return;
+        }
+
+        setGeneralError(data?.message || 'خطا در ثبت‌نام. لطفاً مجدداً تلاش فرمایید.');
+        return;
+      }
+
+      if (!data?.success) {
         setGeneralError(data?.message || 'خطا در ثبت‌نام. لطفاً مجدداً تلاش فرمایید.');
         return;
       }
@@ -106,7 +121,7 @@ function SignupForm() {
 
       router.push(redirect);
     } catch {
-      setGeneralError('خطا در برقراری ارتباط با سرور.');
+      setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
     } finally {
       setIsLoading(false);
     }

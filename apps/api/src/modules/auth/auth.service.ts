@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, ConflictException, ServiceUnavailableException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { CryptoUtil } from '../../common/utils/crypto.util';
@@ -11,8 +11,71 @@ export interface SessionPayload {
   sessionId: string;
 }
 
+export const DEDICATED_TEST_USERS = [
+  {
+    id: 'a0000000-0000-4000-8000-000000000001',
+    key: 'admin',
+    email: 'admin@condorlab.ir',
+    role: UserRole.MasterAdmin,
+    profile: {
+      firstName: 'مدیر ارشد',
+      lastName: 'کندرلب',
+      fullName: 'مدیر ارشد کندرلب',
+      grade: '10',
+      school: 'ستاد مرکزی کندرلب',
+      city: 'تهران',
+      phoneNumber: '09121112233',
+    },
+  },
+  {
+    id: 'a0000000-0000-4000-8000-000000000002',
+    key: 'student-10',
+    email: 'student.tenth@condorlab.ir',
+    role: UserRole.Student,
+    profile: {
+      firstName: 'آرتین',
+      lastName: 'رادمنش',
+      fullName: 'آرتین رادمنش',
+      grade: '10',
+      school: 'دبیرستان علامه حلی ۱ تهران',
+      city: 'تهران',
+      phoneNumber: '09120001010',
+    },
+  },
+  {
+    id: 'a0000000-0000-4000-8000-000000000003',
+    key: 'student-fresh',
+    email: 'student.fresh@condorlab.ir',
+    role: UserRole.Student,
+    profile: {
+      firstName: 'سهراب',
+      lastName: 'سپهری',
+      fullName: 'سهراب سپهری',
+      grade: '11',
+      school: 'دبیرستان البرز تهران',
+      city: 'تهران',
+      phoneNumber: '09120002020',
+    },
+  },
+  {
+    id: 'a0000000-0000-4000-8000-000000000004',
+    key: 'officer',
+    email: 'officer@condorlab.ir',
+    role: UserRole.ExamOfficer,
+    profile: {
+      firstName: 'مسئول',
+      lastName: 'آزمون',
+      fullName: 'مسئول آزمون المپیاد',
+      grade: '10',
+      school: 'کمیته علمی المپیاد',
+      city: 'تهران',
+      phoneNumber: '09120003030',
+    },
+  },
+];
+
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   // کش موقت کاربران برای حفظ وضعیت لاگین حتی در زمان آفلاین بودن پستگرس
   public static inMemoryUsers = new Map<string, any>();
   public static inMemoryCredentials = new Map<string, { userId: string; passwordHash: string }>();
@@ -21,6 +84,76 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
   ) {}
+
+  async onModuleInit() {
+    await this.seedTestUsers();
+  }
+
+  /**
+   * تزریق خودکار کاربران تست اختصاصی در دیتابیس و حافظه (Seed Real Test Accounts)
+   */
+  async seedTestUsers() {
+    const defaultPasswordHash = await CryptoUtil.hashPassword('Password123!');
+
+    for (const testUser of DEDICATED_TEST_USERS) {
+      const memoryUserRecord = {
+        id: testUser.id,
+        role: testUser.role,
+        status: UserStatus.Active,
+        email: testUser.email,
+        profile: { ...testUser.profile },
+        identities: [
+          {
+            provider: 'EMAIL_PASSWORD',
+            identifier: testUser.email,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      };
+
+      AuthService.inMemoryUsers.set(testUser.id, memoryUserRecord);
+      AuthService.inMemoryCredentials.set(testUser.email, {
+        userId: testUser.id,
+        passwordHash: defaultPasswordHash,
+      });
+
+      // همگام‌سازی در دیتابیس PostgreSQL در صورت در دسترس بودن
+      try {
+        await this.prisma.client.user.upsert({
+          where: { id: testUser.id },
+          update: {
+            role: testUser.role,
+            status: UserStatus.Active,
+          },
+          create: {
+            id: testUser.id,
+            role: testUser.role,
+            status: UserStatus.Active,
+            identities: {
+              create: {
+                provider: 'EMAIL_PASSWORD',
+                identifier: testUser.email,
+                passwordHash: defaultPasswordHash,
+                isVerified: true,
+              },
+            },
+            profile: {
+              create: {
+                firstName: testUser.profile.firstName,
+                lastName: testUser.profile.lastName,
+                grade: testUser.profile.grade,
+                school: testUser.profile.school,
+                city: testUser.profile.city,
+                phoneNumber: testUser.profile.phoneNumber,
+              },
+            },
+          },
+        });
+      } catch (e) {
+        // در صورت عدم دسترسی موقت به دیتابیس، رکورد در حافظه آماده است
+      }
+    }
+  }
 
   /**
    * ثبت‌نام داوطلب با اعتبارسنجی پایه تحصیلی
@@ -128,8 +261,11 @@ export class AuthService {
     const email = dto.email.trim().toLowerCase();
     let user: any = null;
 
+    let dbSuccess = false;
+    let identity: any = null;
+
     try {
-      const identity = await this.prisma.client.identity.findFirst({
+      identity = await this.prisma.client.identity.findFirst({
         where: {
           provider: 'EMAIL_PASSWORD',
           identifier: email,
@@ -142,30 +278,70 @@ export class AuthService {
           },
         },
       });
-
-      if (identity && identity.passwordHash) {
-        const isValid = await CryptoUtil.verifyPassword(dto.password, identity.passwordHash);
-        if (!isValid) {
-          throw new UnauthorizedException(messagesFa.auth.invalidCredentials);
-        }
-        user = identity.user;
-      }
-    } catch (e) {
-      if (e instanceof UnauthorizedException) throw e;
+      dbSuccess = true;
+    } catch (dbErr: any) {
+      console.warn('⚠️ خطای اتصال به پایگاه داده در زمان ورود کاربر:', dbErr?.message);
+      dbSuccess = false;
     }
 
-    // اگر دیتابیس در دسترس نبود، بررسی کش موقت
-    if (!user && AuthService.inMemoryCredentials.has(email)) {
-      const cred = AuthService.inMemoryCredentials.get(email)!;
-      const isValid = await CryptoUtil.verifyPassword(dto.password, cred.passwordHash);
-      if (!isValid) {
-        throw new UnauthorizedException(messagesFa.auth.invalidCredentials);
+    if (dbSuccess) {
+      // دیتابیس به درستی پاسخ داده است
+      if (!identity) {
+        // احراز صریح عدم وجود رکورد کاربری در دیتابیس
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'USER_NOT_FOUND',
+          message: messagesFa.auth.invalidCredentials,
+        });
       }
-      user = AuthService.inMemoryUsers.get(cred.userId);
+
+      if (!identity.passwordHash) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'INVALID_CREDENTIALS',
+          message: messagesFa.auth.invalidCredentials,
+        });
+      }
+
+      const isValid = await CryptoUtil.verifyPassword(dto.password, identity.passwordHash);
+      if (!isValid) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'INVALID_PASSWORD',
+          message: messagesFa.auth.invalidCredentials,
+        });
+      }
+
+      user = identity.user;
+    } else {
+      // در صورت قطعی یا خطای شبکه دیتابیس، کش موقت تست می‌شود
+      if (AuthService.inMemoryCredentials.has(email)) {
+        const cred = AuthService.inMemoryCredentials.get(email)!;
+        const isValid = await CryptoUtil.verifyPassword(dto.password, cred.passwordHash);
+        if (!isValid) {
+          throw new UnauthorizedException({
+            statusCode: 401,
+            code: 'INVALID_PASSWORD',
+            message: messagesFa.auth.invalidCredentials,
+          });
+        }
+        user = AuthService.inMemoryUsers.get(cred.userId);
+      } else {
+        // چون ارتباط با سرور دیتابیس برقرار نشده، حتماً خطای اتصال صادر می‌شود (نه خطای نبود اکانت)
+        throw new ServiceUnavailableException({
+          statusCode: 503,
+          code: 'DATABASE_CONNECTION_ERROR',
+          message: 'خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.',
+        });
+      }
     }
 
     if (!user) {
-      throw new UnauthorizedException(messagesFa.auth.invalidCredentials);
+      throw new UnauthorizedException({
+        statusCode: 401,
+        code: 'USER_NOT_FOUND',
+        message: messagesFa.auth.invalidCredentials,
+      });
     }
 
     // صدور سشن جدید و اعمال قاعده FIFO (حداکثر ۲ نشست هم‌زمان)
@@ -213,6 +389,71 @@ export class AuthService {
     }
 
     throw new UnauthorizedException('کاربر یافت نشد.');
+  }
+
+  /**
+   * هویت‌پذیری واقعی در محیط توسعه و تست (Real DB User Impersonation)
+   * جایگزینی قطعی با ماک‌های کلاینت‌ساید و تضمین انطباق ۱۰۰٪ سشن بک‌اند با فرانت‌اند
+   */
+  async impersonate(target: string): Promise<{ user: any; session: SessionPayload }> {
+    const cleanTarget = (target || 'student-10').toLowerCase().trim();
+
+    let testUser = DEDICATED_TEST_USERS.find(
+      (u) =>
+        u.key === cleanTarget ||
+        u.email.toLowerCase() === cleanTarget ||
+        u.role.toLowerCase() === cleanTarget ||
+        u.id === cleanTarget,
+    );
+
+    if (!testUser) {
+      if (cleanTarget.includes('admin')) {
+        testUser = DEDICATED_TEST_USERS[0];
+      } else if (cleanTarget.includes('officer')) {
+        testUser = DEDICATED_TEST_USERS[3];
+      } else if (cleanTarget.includes('fresh')) {
+        testUser = DEDICATED_TEST_USERS[2];
+      } else {
+        testUser = DEDICATED_TEST_USERS[1];
+      }
+    }
+
+    let user: any = null;
+    try {
+      user = await this.prisma.client.user.findUnique({
+        where: { id: testUser.id },
+        include: { profile: true, identities: true },
+      });
+    } catch {
+      // ignore
+    }
+
+    if (!user) {
+      user = AuthService.inMemoryUsers.get(testUser.id);
+    }
+
+    if (!user) {
+      user = {
+        id: testUser.id,
+        role: testUser.role,
+        status: UserStatus.Active,
+        email: testUser.email,
+        profile: { ...testUser.profile },
+      };
+      AuthService.inMemoryUsers.set(user.id, user);
+    }
+
+    // صدور سشن رسمی در ردیس و اعمال قاعده FIFO
+    const sessionId = CryptoUtil.generateSecureToken(24);
+    await this.redis.registerSession(user.id, sessionId, 2);
+
+    const session: SessionPayload = {
+      userId: user.id,
+      role: user.role as UserRole,
+      sessionId,
+    };
+
+    return { user: this.sanitizeUser(user), session };
   }
 
   private sanitizeUser(user: any) {

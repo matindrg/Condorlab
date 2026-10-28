@@ -42,13 +42,66 @@ export class ExamRoomService {
   }
 
   /**
-   * بارگذاری اطلاعات آزمون، پاسخ‌برگ، سوالات و احراز صندلی شرکت در آزمون
+   * خاتمه خودکار آزمون‌های منقضی‌شده و ثبت نهایی پاسخ‌برگ کلیه داوطلبان (Global Auto-Termination)
+   */
+  async autoFinalizeExpiredExams(targetExamId?: string): Promise<{ terminated: number; expired: number }> {
+    const now = new Date();
+    let terminated = 0;
+    let expired = 0;
+
+    try {
+      const examWhere: any = {
+        endTime: { lte: now },
+      };
+      if (targetExamId) {
+        examWhere.id = targetExamId;
+      }
+
+      const expiredExams = await this.prisma.client.exam.findMany({
+        where: examWhere,
+        select: { id: true, endTime: true },
+      });
+
+      for (const ex of expiredExams) {
+        // ۱. بستن خودکار پاسخ‌برگ داوطلبان فعال (IN_PROGRESS) در پایان بازه پنجره آزمون
+        const activeAttempts = await this.prisma.client.attempt.findMany({
+          where: { examId: ex.id, status: 'in_progress' },
+        });
+
+        for (const att of activeAttempts) {
+          await this.prisma.client.attempt.update({
+            where: { id: att.id },
+            data: { status: 'submitted', submittedAt: ex.endTime },
+          });
+          await this.examLock.release(att.id).catch(() => {});
+          terminated++;
+        }
+
+        // ۲. انتقال وضعیت داوطلبان ثبت‌نام‌شده که هرگز آزمون را شروع نکردند به EXPIRED
+        const missedAttempts = await this.prisma.client.attempt.updateMany({
+          where: { examId: ex.id, status: 'not_started' },
+          data: { status: 'expired' },
+        });
+        expired += missedAttempts.count;
+      }
+    } catch (err: any) {
+      console.warn('⚠️ Auto-finalize background task warning:', err?.message);
+    }
+
+    return { terminated, expired };
+  }
+
+  /**
+   * بارگذاری اطلاعات آزمون، پاسخ‌برگ، سوالات و احراز صندلی شرکت در آزمون با ارزیابی دقیق بازه زمانی
    */
   async initRoom(identifier: string, userId: string, sessionId: string, deviceId: string) {
     const dbExam = await this.resolveExam(identifier);
     const dbUser = await this.resolveUser(userId);
 
-    // واکشی یا ایجاد ردیف شرکت (Attempt) — اولویت با آخرین تلاش در حال برگزاری
+    // اجرای ارزیابی تنبل (Lazy Evaluation) برای خاتمه آزمون‌های منقضی‌شده
+    await this.autoFinalizeExpiredExams(dbExam.id);
+
+    // واکشی ردیف شرکت (Attempt) — اولویت با آخرین تلاش در حال برگزاری
     let attempt = await this.prisma.client.attempt.findFirst({
       where: {
         examId: dbExam.id,
@@ -94,19 +147,97 @@ export class ExamRoomService {
       throw new ForbiddenException('شما هنوز در این آزمون ثبت‌نام نکرده‌اید.');
     }
 
-    // اگر ردیف تلاش وجود ندارد یا هنوز شروع نشده است (حالت Pre-Start State طبق دستور صریح و PRD)
-    // به هیچ وجه آزمون خودکار شروع نمی‌شود و تایمر فعال نمی‌گردد
-    if (!attempt || attempt.status === 'not_started') {
+    const now = Date.now();
+    const windowStartTime = dbExam.startTime ? new Date(dbExam.startTime).getTime() : 0;
+    const windowEndTime = dbExam.endTime ? new Date(dbExam.endTime).getTime() : Infinity;
+
+    // سناریوی ۱: بازه آزمون هنوز آغاز نشده است (Pre-Window State)
+    if (now < windowStartTime) {
       return {
         hasStarted: false,
-        canStart: true,
-        isSubmitted: false,
+        canStart: false,
+        isScheduled: true,
+        windowStartTime: new Date(windowStartTime).toISOString(),
+        windowEndTime: new Date(windowEndTime).toISOString(),
         examTitle: dbExam.title,
         exam: {
           id: dbExam.id,
           slug: dbExam.slug,
           title: dbExam.title,
           durationMinutes: dbExam.durationMinutes,
+          windowStartTime: new Date(windowStartTime).toISOString(),
+          windowEndTime: new Date(windowEndTime).toISOString(),
+          totalQuestions,
+          price: dbExam.price,
+        },
+        attempt: attempt
+          ? {
+              id: attempt.id,
+              status: attempt.status,
+              takeoverCount: attempt.takeoverCount || 0,
+              remainingTakeovers: 2,
+            }
+          : null,
+        message: 'بازه رسمی برگزاری آزمون هنوز آغاز نشده است. لطفاً در زمان مقرر مراجعه فرمایید.',
+      };
+    }
+
+    // سناریوی ۲: پایان بازه آزمون فرا رسیده است (Post-Window Hard Cutoff)
+    if (now >= windowEndTime) {
+      if (attempt && attempt.status === 'in_progress') {
+        // خاتمه آنی آزمون داوطلب فعال و ثبت نهایی در زمان بسته شدن پنجره
+        await this.prisma.client.attempt.update({
+          where: { id: attempt.id },
+          data: { status: 'submitted', submittedAt: new Date(windowEndTime) },
+        });
+        await this.examLock.release(attempt.id).catch(() => {});
+        attempt.status = 'submitted';
+        attempt.submittedAt = new Date(windowEndTime);
+      } else if (!attempt || attempt.status === 'not_started') {
+        if (attempt) {
+          await this.prisma.client.attempt.update({
+            where: { id: attempt.id },
+            data: { status: 'expired' },
+          }).catch(() => {});
+        }
+        return {
+          hasStarted: false,
+          canStart: false,
+          isExpired: true,
+          windowStartTime: new Date(windowStartTime).toISOString(),
+          windowEndTime: new Date(windowEndTime).toISOString(),
+          examTitle: dbExam.title,
+          exam: {
+            id: dbExam.id,
+            slug: dbExam.slug,
+            title: dbExam.title,
+            durationMinutes: dbExam.durationMinutes,
+            windowStartTime: new Date(windowStartTime).toISOString(),
+            windowEndTime: new Date(windowEndTime).toISOString(),
+            totalQuestions,
+            price: dbExam.price,
+          },
+          message: 'مهلت رسمی شرکت در این آزمون به پایان رسیده و پنجره ورود بسته شده است.',
+        };
+      }
+    }
+
+    // اگر ردیف تلاش وجود ندارد یا هنوز شروع نشده است (حالت Pre-Start State طبق دستور صریح و PRD)
+    if (!attempt || attempt.status === 'not_started') {
+      return {
+        hasStarted: false,
+        canStart: true,
+        isSubmitted: false,
+        windowStartTime: new Date(windowStartTime).toISOString(),
+        windowEndTime: new Date(windowEndTime).toISOString(),
+        examTitle: dbExam.title,
+        exam: {
+          id: dbExam.id,
+          slug: dbExam.slug,
+          title: dbExam.title,
+          durationMinutes: dbExam.durationMinutes,
+          windowStartTime: new Date(windowStartTime).toISOString(),
+          windowEndTime: new Date(windowEndTime).toISOString(),
           totalQuestions,
           price: dbExam.price,
         },
@@ -126,16 +257,30 @@ export class ExamRoomService {
       this.examLock.syncTakeoverCount(attempt.id, attempt.takeoverCount);
     }
 
-    if (attempt.status === 'submitted') {
+    // سناریوی ۳: آزمون به پایان رسیده است — بازگرداندن پاسخ‌ها و آمار خلاصه پاسخ‌برگ (Task 5)
+    if (attempt.status === 'submitted' || attempt.status === 'graded' || attempt.status === 'completed') {
+      const mergedAnswers = await this.getMergedAnswers(attempt.id);
+      const allAnswers = Object.values(mergedAnswers);
+      const answeredCount = allAnswers.filter((a: any) => {
+        const hasOption = a.selectedOption !== null && a.selectedOption > 0;
+        const hasStatements = a.selectedStatements && Object.values(a.selectedStatements).some((v) => v !== null && v !== undefined);
+        const hasNumeric = a.numericValue !== null && a.numericValue !== undefined;
+        return hasOption || hasStatements || hasNumeric;
+      }).length;
+      const flaggedCount = allAnswers.filter((a) => a.isFlagged).length;
+      const unansweredCount = Math.max(0, totalQuestions - answeredCount);
+
       return {
         isSubmitted: true,
-        submittedAt: attempt.submittedAt,
+        submittedAt: attempt.submittedAt?.toISOString(),
         examTitle: dbExam.title,
         exam: {
           id: dbExam.id,
           slug: dbExam.slug,
           title: dbExam.title,
           durationMinutes: dbExam.durationMinutes,
+          windowStartTime: new Date(windowStartTime).toISOString(),
+          windowEndTime: new Date(windowEndTime).toISOString(),
           totalQuestions,
           price: dbExam.price,
         },
@@ -146,47 +291,50 @@ export class ExamRoomService {
           remainingTakeovers: 0,
           status: attempt.status,
         },
+        questions: sanitizedQuestions,
+        answers: mergedAnswers,
+        summary: {
+          totalQuestions,
+          answeredCount,
+          unansweredCount,
+          flaggedCount,
+        },
         message: 'شما قبلاً این آزمون را به پایان رسانده و پاسخ‌برگ را ارسال کرده‌اید.',
       };
     }
 
-    // محاسبه زمان باقیمانده بر مبنای ساعت سرور و شروع آزمون
+    // محاسبه زمان باقیمانده با اعمال سقف دوگانه: مدت آزمون کاربر و پنجره نهایی آزمون (Global Hard Cutoff)
     const durationMinutes = dbExam.durationMinutes || 120;
-    let startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
-    let expiryTime = startedAt + durationMinutes * 60 * 1000;
-    const now = Date.now();
-    let remainingSeconds = Math.max(0, Math.floor((expiryTime - now) / 1000));
-
-    // اگر کاربر هنوز آزمون را آغاز نکرده یا پاسخی ثبت نکرده و زمان انقضا بر مبنای تاریخ ثبت‌نام منقضی شده است،
-    // زمان شروع آزمون از لحظه ورود داوطلب به اتاق آزمون محاسبه می‌شود
-    if (remainingSeconds <= 0 && (!attempt.answers || attempt.answers.length === 0) && (now - startedAt > 86400000)) {
-      startedAt = now;
-      expiryTime = startedAt + durationMinutes * 60 * 1000;
-      remainingSeconds = durationMinutes * 60;
-
-      this.prisma.client.attempt
-        .update({
-          where: { id: attempt.id },
-          data: { startedAt: new Date(startedAt) },
-        })
-        .catch(() => {});
-    }
+    let startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : now;
+    const userExpiryTime = startedAt + durationMinutes * 60 * 1000;
+    const effectiveExpiryTime = Math.min(userExpiryTime, windowEndTime);
+    let remainingSeconds = Math.max(0, Math.floor((effectiveExpiryTime - now) / 1000));
 
     // بررسی اتمام مهلت آزمون و مهلت اضطراری ۲ دقیقه‌ای (Grace Period)
     if (remainingSeconds <= 0) {
-      const gracePeriodMs = 120_000; // ۲ دقیقه مهلت اتصال مجدد و تخلیه بافر طبق درخواست و PRD
-      const graceRemainingSeconds = Math.max(0, Math.floor((expiryTime + gracePeriodMs - now) / 1000));
+      const gracePeriodMs = 120_000;
+      const graceRemainingSeconds = Math.max(0, Math.floor((effectiveExpiryTime + gracePeriodMs - now) / 1000));
 
-      // اگر مهلت ۲ دقیقه اضافه هم تمام شده باشد، آزمون قطعی خاتمه یافته است
       if (graceRemainingSeconds <= 0) {
-        const submittedAt = new Date(expiryTime);
+        const submittedAt = new Date(effectiveExpiryTime);
         await this.prisma.client.attempt
           .update({
             where: { id: attempt.id },
             data: { status: 'submitted', submittedAt },
           })
           .catch(() => {});
-        await this.examLock.release(attempt.id);
+        await this.examLock.release(attempt.id).catch(() => {});
+
+        const mergedAnswers = await this.getMergedAnswers(attempt.id);
+        const allAnswers = Object.values(mergedAnswers);
+        const answeredCount = allAnswers.filter((a: any) => {
+          const hasOption = a.selectedOption !== null && a.selectedOption > 0;
+          const hasStatements = a.selectedStatements && Object.values(a.selectedStatements).some((v) => v !== null && v !== undefined);
+          const hasNumeric = a.numericValue !== null && a.numericValue !== undefined;
+          return hasOption || hasStatements || hasNumeric;
+        }).length;
+        const flaggedCount = allAnswers.filter((a) => a.isFlagged).length;
+        const unansweredCount = Math.max(0, totalQuestions - answeredCount);
 
         return {
           isSubmitted: true,
@@ -197,6 +345,8 @@ export class ExamRoomService {
             slug: dbExam.slug,
             title: dbExam.title,
             durationMinutes: dbExam.durationMinutes,
+            windowStartTime: new Date(windowStartTime).toISOString(),
+            windowEndTime: new Date(windowEndTime).toISOString(),
             totalQuestions,
             price: dbExam.price,
           },
@@ -206,6 +356,14 @@ export class ExamRoomService {
             takeoverCount: attempt.takeoverCount || 0,
             remainingTakeovers: 0,
             status: 'submitted',
+          },
+          questions: sanitizedQuestions,
+          answers: mergedAnswers,
+          summary: {
+            totalQuestions,
+            answeredCount,
+            unansweredCount,
+            flaggedCount,
           },
           message: 'مهلت پاسخ‌گویی به این آزمون به پایان رسیده و پاسخ‌های شما ثبت نهایی گردید.',
         };
@@ -307,6 +465,18 @@ export class ExamRoomService {
       throw new BadRequestException('این آزمون قبلاً به پایان رسیده و پاسخ‌برگ آن ارسال گردیده است.');
     }
 
+    // اعتبارسنجی بازه رسمی آزمون (Official Exam Time-Window Scheduling)
+    const nowTime = Date.now();
+    const windowStartTime = dbExam.startTime ? new Date(dbExam.startTime).getTime() : 0;
+    const windowEndTime = dbExam.endTime ? new Date(dbExam.endTime).getTime() : Infinity;
+
+    if (nowTime < windowStartTime) {
+      throw new BadRequestException('بازه رسمی برگزاری آزمون هنوز آغاز نشده است.');
+    }
+    if (nowTime >= windowEndTime) {
+      throw new BadRequestException('مهلت رسمی شرکت در این آزمون به پایان رسیده و پنجره ورود بسته شده است.');
+    }
+
     const now = new Date();
     if (!attempt) {
       attempt = await this.prisma.client.attempt.create({
@@ -367,25 +537,27 @@ export class ExamRoomService {
     const dbExam = await this.resolveExam(attempt.examId);
     const durationMinutes = dbExam.durationMinutes || 120;
     const startedAt = attempt.startedAt ? new Date(attempt.startedAt).getTime() : Date.now();
-    const expiryTime = startedAt + durationMinutes * 60 * 1000;
+    const userExpiryTime = startedAt + durationMinutes * 60 * 1000;
+    const windowEndTime = dbExam.endTime ? new Date(dbExam.endTime).getTime() : Infinity;
+    const effectiveExpiryTime = Math.min(userExpiryTime, windowEndTime);
     const now = Date.now();
     const gracePeriodMs = 120_000; // ۲ دقیقه مهلت اضطراری برای وصل شدن و تخلیه صف آفلاین طبق PRD
 
-    // اگر زمان آزمون به همراه ۲ دقیقه مهلت اضطراری سپری شده باشد، پاسخ جدید نمی‌پذیریم و آزمون قطعی ثبت می‌شود
-    if (now > expiryTime + gracePeriodMs) {
+    // اگر زمان آزمون یا پنجره کلی به پایان رسیده باشد، پاسخ جدید نمی‌پذیریم و آزمون قطعی ثبت می‌شود
+    if (now > effectiveExpiryTime + gracePeriodMs) {
       if (attempt.status !== 'submitted') {
         await this.prisma.client.attempt
           .update({
             where: { id: attemptId },
-            data: { status: 'submitted', submittedAt: new Date(expiryTime) },
+            data: { status: 'submitted', submittedAt: new Date(effectiveExpiryTime) },
           })
           .catch(() => {});
-        await this.examLock.release(attemptId);
+        await this.examLock.release(attemptId).catch(() => {});
       }
       throw new ConflictException({
         statusCode: 409,
         code: 'EXAM_TIME_EXPIRED',
-        message: 'مهلت رسمی و مهلت اضطراری آزمون به پایان رسیده و پاسخ‌برگ ثبت نهایی شده است.',
+        message: 'مهلت رسمی آزمون یا پنجره برگزاری به پایان رسیده و پاسخ‌برگ ثبت نهایی شده است.',
       });
     }
 
@@ -552,6 +724,19 @@ export class ExamRoomService {
     const flaggedCount = allAnswers.filter((a) => a.isFlagged).length;
     const unansweredCount = Math.max(0, totalQuestions - answeredCount);
 
+    const sanitizedQuestions = examQuestions.map((q) => {
+      const { correctOption, correctStatements, correctNumber, ...safe } = q;
+      if (safe.statements) {
+        safe.statements = safe.statements.map((s) => {
+          const { correctValue, ...safeStmt } = s;
+          return safeStmt;
+        });
+      }
+      return safe;
+    });
+
+    const mergedAnswers = await this.getMergedAnswers(attemptId);
+
     return {
       success: true,
       status: 'submitted',
@@ -563,6 +748,8 @@ export class ExamRoomService {
         unansweredCount,
         flaggedCount,
       },
+      answers: mergedAnswers,
+      questions: sanitizedQuestions,
     };
   }
 

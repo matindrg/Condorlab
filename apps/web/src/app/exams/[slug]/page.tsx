@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ExamSummary, messagesFa } from '@condorlab/shared';
-import { BookOpen, Users, Flame, AlertCircle, CheckCircle2, ArrowRight, ShieldCheck, Clock, Trophy } from 'lucide-react';
+import { BookOpen, Users, Flame, AlertCircle, CheckCircle2, ArrowRight, ShieldCheck, Clock, Trophy, FileCheck2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 
 export default function ExamDetailPage() {
@@ -292,9 +292,18 @@ export default function ExamDetailPage() {
                       مشاهده کارنامه
                     </Link>
                   ) : exam.examState === 'SUBMITTED' ? (
-                    <div className="w-full text-xs font-bold py-3 px-4 rounded-xl bg-white/5 border border-white/10 text-center text-gray-400 flex items-center justify-center gap-2">
-                      <Clock className="w-4 h-4 text-cyan-400" />
-                      <span>در انتظار صدور کارنامه (آزمون پایان یافته)</span>
+                    <div className="space-y-2">
+                      <Link
+                        href={`/exam/${exam.slug}/summary`}
+                        className="w-full text-xs font-bold min-h-[44px] px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/30 transition-all flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <FileCheck2 className="w-4 h-4 text-cyan-400" />
+                        <span>مشاهده خلاصه پاسخ‌برگ</span>
+                      </Link>
+                      <div className="w-full text-[11px] font-medium py-2 px-3 rounded-lg bg-white/5 border border-white/10 text-center text-gray-400 flex items-center justify-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>پاسخ‌برگ ثبت شد (در انتظار کارنامه رسمی)</span>
+                      </div>
                     </div>
                   ) : exam.examState === 'IN_PROGRESS' ? (
                     <Button

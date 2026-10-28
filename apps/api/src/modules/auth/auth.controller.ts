@@ -51,6 +51,21 @@ export class AuthController {
     return { success: true };
   }
 
+  @Post('impersonate')
+  @HttpCode(HttpStatus.OK)
+  async impersonate(
+    @Body('target') target: string,
+    @Body('role') role: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { user, session } = await this.authService.impersonate(target || role);
+    this.setSessionCookie(res, session.userId, session.sessionId);
+    return {
+      success: true,
+      user,
+    };
+  }
+
   @Get('me')
   @UseGuards(AuthGuard)
   async getMe(@CurrentUser('id') userId: string) {

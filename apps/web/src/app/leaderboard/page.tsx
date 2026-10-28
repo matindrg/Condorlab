@@ -81,7 +81,7 @@ export default function LeaderboardDirectoryPage() {
   return (
     <div className="min-h-screen bg-[#0E0F12] text-foreground font-sans pb-24">
       {/* هدر باشکوه بخش لیدربورد کشوری */}
-      <section className="relative overflow-hidden border-b border-white/5 bg-gradient-to-b from-[#18191E] via-[#121318] to-[#0E0F12] pt-12 pb-14">
+      <section className="relative overflow-hidden border-b border-white/5 bg-gradient-to-b from-[#18191E] via-[#121318] to-[#0E0F12] pt-12 pb-10">
         <div className="absolute top-0 right-1/4 w-96 h-96 bg-[#FFCC00]/5 rounded-full blur-3xl pointer-events-none" />
         <div className="max-w-6xl mx-auto px-4 sm:px-6 relative z-10">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#FFCC00]/10 border border-[#FFCC00]/25 text-[#FFCC00] text-xs font-bold mb-4 shadow-sm">
@@ -96,38 +96,40 @@ export default function LeaderboardDirectoryPage() {
             مشاهده رتبه‌های رسمی، اسامی نفرات برتر، تفکیک شهر و مدارس داوطلبان المپیاد زیست‌شناسی کشور،
             با سیستم نمره‌دهی رسمی و رتبه‌بندی استاندارد المپیادی ($۱، ۲، ۲، ۴$).
           </p>
-
-          {/* نوار جستجو و فیلتر دسته‌بندی */}
-          <div className="mt-8 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 scrollbar-none">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
-                    selectedCategory === cat.id
-                      ? 'bg-[#FFCC00] text-black shadow-md shadow-[#FFCC00]/20'
-                      : 'bg-[#181A20] text-gray-300 hover:text-white hover:bg-[#20232B] border border-white/5'
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="relative w-full md:w-72">
-              <Search className="w-4 h-4 text-gray-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="جستجوی نام آزمون..."
-                className="w-full bg-[#181A20] border border-white/10 rounded-xl pr-10 pl-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00]/60 transition-colors"
-              />
-            </div>
-          </div>
         </div>
       </section>
+
+      {/* نوار جستجو و فیلتر دسته‌بندی استیکی با بلور و بدون باگ پس‌زمینه مشکی طبق استانداردهای UI/UX Pro Max */}
+      <nav className="sticky top-16 z-30 bg-[#0E0F12]/85 backdrop-blur-md border-b border-white/10 py-3.5 shadow-md shadow-black/20 transition-all">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+                  selectedCategory === cat.id
+                    ? 'bg-[#FFCC00] text-black shadow-md shadow-[#FFCC00]/20 font-black'
+                    : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/10'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative w-full md:w-72">
+            <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="جستجوی نام آزمون..."
+              className="w-full bg-[#181A20]/90 border border-white/10 rounded-xl pr-10 pl-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00]/60 transition-colors shadow-inner"
+            />
+          </div>
+        </div>
+      </nav>
 
       {/* محتوای کارت‌های آزمون */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-10">

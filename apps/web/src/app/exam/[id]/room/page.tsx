@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, use } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   useExamHeartbeat,
@@ -14,11 +15,13 @@ import { WatermarkOverlay } from '@/components/exam-room/watermark-overlay';
 import { TakeoverModal } from '@/components/exam-room/takeover-modal';
 import { SubmitModal } from '@/components/exam-room/submit-modal';
 import { ShortcutsModal } from '@/components/exam-room/shortcuts-modal';
+import { PostExamSummary } from '@/components/exam-room/post-exam-summary';
 import {
   Loader2,
   AlertCircle,
   CheckCircle2,
   FileCheck,
+  FileCheck2,
   ArrowRight,
   Sheet,
   BookOpen,
@@ -34,6 +37,8 @@ interface ExamRoomData {
   isGracePeriod?: boolean;
   graceRemainingSeconds?: number;
   examTitle?: string;
+  windowStartTime?: string;
+  windowEndTime?: string;
   exam: {
     id: string;
     slug: string;
@@ -41,6 +46,8 @@ interface ExamRoomData {
     durationMinutes: number;
     totalQuestions: number;
     price: number;
+    windowStartTime?: string;
+    windowEndTime?: string;
   };
   attempt: {
     id: string;
@@ -420,11 +427,159 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  // حالت پیش از شروع (Pre-Start State): صندلی رزرو شده اما آزمون هنوز آغاز نشده است
+  // محاسبات پنجره زمانی و انقضای آزمون
+  const nowTime = Date.now();
+  const rawStart = roomData.windowStartTime || roomData.exam?.windowStartTime;
+  const rawEnd = roomData.windowEndTime || roomData.exam?.windowEndTime;
+  const windowStart = rawStart ? new Date(rawStart).getTime() : null;
+  const windowEnd = rawEnd ? new Date(rawEnd).getTime() : null;
+
+  const isBeforeWindow = Boolean((roomData as any).isScheduled || (windowStart && nowTime < windowStart));
+  const isAfterWindow = Boolean((roomData as any).isExpired || (windowEnd && nowTime > windowEnd));
+  const isAlreadySubmitted = Boolean(
+    roomData.isSubmitted ||
+    roomData.attempt?.status === 'submitted' ||
+    roomData.attempt?.status === 'graded' ||
+    status === 'submitted' ||
+    submissionSummary
+  );
+
+  // گیت اول: اگر آزمون پیش از این ثبت نهایی شده باشد (Rule B & Rule A)
+  if (isAlreadySubmitted) {
+    // اگر کاربر در همین سشن جاری دکمه ثبت آزمون را زده است، نمایش آنی خلاصه پاسخ‌برگ
+    if (submissionSummary) {
+      const finalSummary = submissionSummary;
+      return (
+        <PostExamSummary
+          examTitle={roomData.exam?.title || (roomData as any).examTitle || 'آزمون المپیاد'}
+          examSlug={roomData.exam?.slug || examIdentifier}
+          submittedAt={roomData.submittedAt || new Date().toISOString()}
+          questions={roomData.questions || []}
+          answers={(answers && Object.keys(answers).length > 0 ? answers : roomData.answers) || {}}
+          summary={finalSummary}
+          studentName={roomData.studentInfo?.name}
+        />
+      );
+    }
+
+    // اگر از طریق لینک مستقیم یا URL وارد اتاق آزمون شده است، مسدودسازی لابی و نمایش وضعیت قطعی
+    return (
+      <div className="min-h-screen bg-[#0E0F12] flex flex-col items-center justify-center p-4" dir="rtl">
+        <div className="p-8 sm:p-10 rounded-3xl bg-[#16181D] border border-emerald-500/30 shadow-2xl text-center max-w-lg w-full space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/20">
+            <CheckCircle2 className="w-10 h-10" />
+          </div>
+          <div>
+            <span className="text-xs font-bold text-emerald-400 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 inline-block mb-2">
+              آزمون پایان یافته
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-white">
+              شما قبلاً در این آزمون شرکت کرده‌اید
+            </h1>
+            <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+              پاسخ‌برگ شما با موفقیت در سامانه ثبت شده است و امکان ورود مجدد به لابی یا شروع مجدد آزمون وجود ندارد.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <Link
+              href={`/exam/${roomData.exam?.slug || examIdentifier}/summary`}
+              className="flex-1 py-3 px-6 text-xs font-bold text-black bg-[#FFCC00] hover:bg-[#FFD633] rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+            >
+              <FileCheck2 className="w-4 h-4" />
+              <span>مشاهده خلاصه پاسخ‌برگ</span>
+            </Link>
+            <Link
+              href="/student/dashboard"
+              className="px-5 py-3 text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/10 flex items-center justify-center"
+            >
+              بازگشت به داشبورد
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // گیت دوم: زمان برگزاری این آزمون هنوز فرا نرسیده است
+  if (isBeforeWindow) {
+    const formattedStartTime = windowStart
+      ? new Date(windowStart).toLocaleString('fa-IR', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : 'زمان اعلام‌شده';
+
+    return (
+      <div className="min-h-screen bg-[#0E0F12] flex flex-col items-center justify-center p-4" dir="rtl">
+        <div className="p-8 sm:p-10 rounded-3xl bg-[#16181D] border border-[#2B303D] shadow-2xl text-center max-w-lg w-full space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-[#FFCC00]/10 text-[#FFCC00] flex items-center justify-center mx-auto border border-[#FFCC00]/20">
+            <Clock className="w-10 h-10" />
+          </div>
+          <div>
+            <span className="text-xs font-bold text-[#FFCC00] px-3 py-1 rounded-full bg-[#FFCC00]/10 border border-[#FFCC00]/20 inline-block mb-2">
+              شروع در {formattedStartTime}
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-white">
+              زمان برگزاری این آزمون هنوز فرا نرسیده است
+            </h1>
+            <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+              صندلی شما رزرو است. به محض فرارسیدن بازه رسمی ({formattedStartTime})، امکان ورود به لابی و شروع آزمون فراهم خواهد شد.
+            </p>
+          </div>
+          <Link
+            href="/student/dashboard"
+            className="w-full py-3 px-6 text-xs font-bold text-black bg-[#FFCC00] hover:bg-[#FFD633] rounded-xl transition-all shadow-md flex items-center justify-center"
+          >
+            بازگشت به داشبورد
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // گیت سوم: مهلت برگزاری این آزمون به پایان رسیده است
+  if (isAfterWindow || roomData.remainingSeconds <= 0) {
+    return (
+      <div className="min-h-screen bg-[#0E0F12] flex flex-col items-center justify-center p-4" dir="rtl">
+        <div className="p-8 sm:p-10 rounded-3xl bg-[#16181D] border border-amber-500/30 shadow-2xl text-center max-w-lg w-full space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+            <Clock className="w-10 h-10" />
+          </div>
+          <div>
+            <span className="text-xs font-bold text-amber-400 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 inline-block mb-2">
+              مهلت شرکت به پایان رسید
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-white">
+              مهلت برگزاری این آزمون به پایان رسیده است
+            </h1>
+            <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+              داوطلب گرامی، پنجره زمانی مجاز برای شرکت در این آزمون بسته شده است و امکان آغاز آزمون وجود ندارد.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <Link
+              href="/exams"
+              className="px-5 py-3 text-xs font-semibold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors flex items-center justify-center"
+            >
+              مشاهده سایر آزمون‌ها
+            </Link>
+            <Link
+              href="/student/dashboard"
+              className="flex-1 py-3 px-6 text-xs font-bold text-black bg-[#FFCC00] hover:bg-[#FFD633] rounded-xl transition-all shadow-md flex items-center justify-center"
+            >
+              بازگشت به داشبورد
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // گیت چهارم: لابی رسمی آزمون (تنها در صورتی که در بازه زمانی مجاز بوده و آزمون هنوز آغاز نشده باشد)
   if (roomData.hasStarted === false) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-        <div className="p-8 sm:p-10 rounded-3xl bg-card border border-primary/30 shadow-2xl text-center max-w-xl w-full space-y-6">
+      <div className="min-h-screen bg-[#0E0F12] text-foreground flex flex-col items-center justify-center p-4" dir="rtl">
+        <div className="p-8 sm:p-10 rounded-3xl bg-[#16181D] border border-primary/30 shadow-2xl text-center max-w-xl w-full space-y-6">
           <div className="w-16 h-16 rounded-3xl bg-primary/10 text-primary flex items-center justify-center mx-auto border border-primary/20">
             <ShieldCheck className="w-10 h-10" />
           </div>
@@ -433,45 +588,45 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
             <span className="text-xs font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20 inline-block mb-2">
               صندلی رسمی شما رزرو شده است
             </span>
-            <h1 className="text-xl sm:text-2xl font-black text-foreground">
+            <h1 className="text-xl sm:text-2xl font-black text-white">
               {roomData.exam?.title || roomData.examTitle || 'اتاق آزمون المپیاد'}
             </h1>
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+            <p className="text-xs text-gray-400 mt-2 leading-relaxed">
               داوطلب گرامی، شما وارد لابی آزمون شده‌اید. تا پیش از کلیک روی دکمه شروع آزمون، زمان‌سنج فعال نخواهد شد.
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-muted/40 border border-border text-xs text-right space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-border/50">
-              <span className="text-muted-foreground flex items-center gap-1.5">
+          <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 text-xs text-right space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <span className="text-gray-400 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-primary" />
                 مدت زمان پاسخ‌گویی:
               </span>
-              <span className="font-mono font-bold text-foreground">
+              <span className="font-mono font-bold text-white">
                 {roomData.exam?.durationMinutes || 120} دقیقه
               </span>
             </div>
-            <div className="flex items-center justify-between pb-2 border-b border-border/50">
-              <span className="text-muted-foreground flex items-center gap-1.5">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <span className="text-gray-400 flex items-center gap-1.5">
                 <BookOpen className="w-4 h-4 text-primary" />
                 تعداد سؤالات:
               </span>
-              <span className="font-mono font-bold text-foreground">
+              <span className="font-mono font-bold text-white">
                 {roomData.exam?.totalQuestions || 60} سؤال
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground flex items-center gap-1.5">
+              <span className="text-gray-400 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-500" />
                 پایداری و قفل نشست:
               </span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              <span className="text-emerald-400 font-medium">
                 تک‌نشست با ۲ دقیقه مهلت اضطراری آفلاین
               </span>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-400 text-xs text-right leading-relaxed flex items-start gap-2.5">
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-400 text-xs text-right leading-relaxed flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
             <span>
               <strong>قانون تک‌دستگاه (Anti-Cheat):</strong> به محض شروع، این آزمون روی همین مرورگر قفل خواهد شد و خروج از پنجره یا تعویض تب در کارنامه ثبت می‌گردد.
@@ -482,7 +637,7 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
             <button
               onClick={() => router.push('/student/dashboard')}
               disabled={isStarting}
-              className="px-5 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-xl transition-colors"
+              className="px-5 py-3 text-xs font-semibold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/10"
             >
               بازگشت به داشبورد
             </button>
@@ -509,62 +664,6 @@ export default function ExamRoomPage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  // اگر آزمون قبلاً ارسال شده باشد یا زمان آن به پایان رسیده باشد
-  if (roomData.isSubmitted || roomData.remainingSeconds <= 0 || status === 'submitted' || submissionSummary) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-        <div className="p-8 sm:p-10 rounded-3xl bg-card border border-emerald-500/30 shadow-2xl text-center max-w-lg w-full space-y-6">
-          <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto border border-emerald-500/20">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
-
-          <div>
-            <h1 className="text-xl font-bold text-foreground">
-              {roomData.isSubmitted || status === 'submitted' || submissionSummary
-                ? 'پاسخ‌برگ شما با موفقیت ثبت شد'
-                : 'مهلت پاسخ‌گویی به آزمون به پایان رسید'}
-            </h1>
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              آزمون «{roomData.exam?.title || (roomData as any).examTitle || 'المپیاد'}» برای شما به پایان رسید و پاسخ‌های شما در سرور مرکزی کندرلب قفل گردید.
-            </p>
-          </div>
-
-          {submissionSummary && (
-            <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-muted/40 border border-border text-xs">
-              <div>
-                <span className="text-muted-foreground">کل سؤالات</span>
-                <div className="font-mono font-bold text-sm text-foreground mt-1">
-                  {submissionSummary.totalQuestions}
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">پاسخ‌داده</span>
-                <div className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-                  {submissionSummary.answeredCount}
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">نزده</span>
-                <div className="font-mono font-bold text-sm text-foreground mt-1">
-                  {submissionSummary.unansweredCount}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="pt-2 flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => router.push('/student/dashboard')}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-6 text-xs font-bold text-primary-foreground bg-primary rounded-xl hover:bg-primary/90 transition-colors shadow-md"
-            >
-              مشاهده وضعیت در داشبورد
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   const currentAnswer = answers[activeQuestion];
 

@@ -31,6 +31,8 @@ export interface ExamSummary {
   status: ExamStatus;
   startTime: string;
   endTime: string;
+  windowStartTime?: string; // شروع بازه آزمون رسمی
+  windowEndTime?: string;   // پایان بازه آزمون رسمی (Global Hard Cutoff)
   durationMinutes: number;
   totalQuestions: number;
   price: number;

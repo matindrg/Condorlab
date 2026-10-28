@@ -279,9 +279,9 @@ export function Navbar() {
           )}
         </div>
 
-        {/* دکمه‌های کنترل موبایل (آواتار کاربر + دکمه منو همبرگری) */}
+        {/* دکمه‌های کنترل موبایل (آواتار کاربر + دکمه منو همبرگری با تضمین هیدریشن یکدست) */}
         <div ref={mobileToggleRef} className="flex md:hidden items-center gap-1.5">
-          {user && (
+          {mounted && user && (
             <button
               type="button"
               onClick={() => setIsMenuOpen((prev) => !prev)}
@@ -312,7 +312,7 @@ export function Navbar() {
           className="md:hidden border-t border-white/10 bg-[#14161C]/95 backdrop-blur-xl px-4 py-4 space-y-4 shadow-2xl"
         >
           {/* وضعیت کاربر لاگین‌شده در نمای موبایل */}
-          {user ? (
+          {mounted && user ? (
             <div className="p-3.5 rounded-2xl bg-[#1D2028] border border-[#2E3340] space-y-3 text-right">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFCC00] to-[#E6B800] text-black font-black text-sm flex items-center justify-center shrink-0 shadow-sm">

@@ -35,6 +35,11 @@ function LoginForm() {
       return;
     }
 
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+      return;
+    }
+
     setIsLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
@@ -45,7 +50,24 @@ function LoginForm() {
 
       const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data?.success) {
+      if (!res.ok) {
+        // تفکیک قطعی خطای شبکه و اتصال سرور/دیتابیس از خطای اعتبارسنجی کاربری
+        if (res.status >= 500 || res.status === 408 || res.status === 502 || res.status === 503 || res.status === 504) {
+          setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+          return;
+        }
+
+        // تنها در صورت پاسخ صریح ۴۰۱ یا ۴۰۴ مبنی بر نبود کاربر یا رمز اشتباه
+        if (res.status === 401 || res.status === 404) {
+          setGeneralError(data?.message || messagesFa.auth.invalidCredentials);
+          return;
+        }
+
+        setGeneralError(data?.message || 'خطا در ورود به حساب کاربری.');
+        return;
+      }
+
+      if (!data?.success) {
         setGeneralError(data?.message || messagesFa.auth.invalidCredentials);
         return;
       }
@@ -59,7 +81,8 @@ function LoginForm() {
 
       router.push(redirect);
     } catch {
-      setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت را بررسی فرمایید.');
+      // تفکیک خطای قطع اینترنت و TypeError: Failed to fetch
+      setGeneralError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
     } finally {
       setIsLoading(false);
     }
